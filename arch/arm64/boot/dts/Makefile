@@ -1,10 +1,8 @@
-dtb-$(CONFIG_ARCH_THUNDER) += thunder-88xx.dtb
-dtb-$(CONFIG_ARCH_VEXPRESS) += rtsm_ve-aemv8a.dtb foundation-v8.dtb
-dtb-$(CONFIG_ARCH_XGENE) += apm-mustang.dtb
+dtb-y += exynos7870-a6lte_kor_single_00.dtb
 
 targets += dtbs
-targets += $(dtb-y)
+DTB_LIST  := $(dtb-y) $(dtbo-y)
 
-dtbs: $(addprefix $(obj)/, $(dtb-y))
+dtbs: $(addprefix $(obj)/, $(DTB_LIST))
 
-clean-files := *.dtb
+clean-files := *.dtb*
