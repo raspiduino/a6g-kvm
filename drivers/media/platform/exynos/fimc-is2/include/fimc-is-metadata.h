@@ -774,6 +774,7 @@ enum aa_scene_mode {
 	AA_SCENE_MODE_THERMAL,
 	AA_SCENE_MODE_VIDEO_COLLAGE,
 	AA_SCENE_MODE_PRO_MODE,
+	AA_SCENE_MODE_FACE_LOCK,
 };
 
 enum aa_effect_mode {
@@ -1696,8 +1697,9 @@ struct camera2_uctl {
 	enum camera_vt_mode		vtMode;
 	float				zoomRatio;
 	enum camera_flash_mode		flashMode;
-	enum camera_op_mode             opMode;
-	uint32_t			reserved[8];
+	enum camera_op_mode		opMode;
+	uint8_t				countryCode[4];
+	uint32_t			reserved[7];
 };
 
 struct camera2_udm {

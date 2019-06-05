@@ -1437,6 +1437,7 @@
 			id = <0>; /* matching sensor id */
 			fnum = <17>; /* F1_7 : fimc-is-param.h */
 			setfile = "setA";
+			use_initial_ae;	/* for initial AE */
 		};
 	};
 
@@ -1475,6 +1476,7 @@
 			id = <1>; /* matching sensor id */
 			fnum = <2>; /* F1_9 : fimc-is-param.h */
 			setfile = "setA"; /*EVT 01*/
+			use_initial_ae;	/* for initial AE */
 		};
 	};
 
