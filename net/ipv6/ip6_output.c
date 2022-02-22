@@ -159,37 +159,36 @@ int ip6_xmit(struct sock *sk, struct sk_buff *skb, struct flowi6 *fl6,
 	struct ipv6_pinfo *np = inet6_sk(sk);
 	struct in6_addr *first_hop = &fl6->daddr;
 	struct dst_entry *dst = skb_dst(skb);
-	unsigned int head_room;
 	struct ipv6hdr *hdr;
 	u8  proto = fl6->flowi6_proto;
 	int seg_len = skb->len;
 	int hlimit = -1;
 	u32 mtu;
 
-	head_room = sizeof(struct ipv6hdr) + LL_RESERVED_SPACE(dst->dev);
-	if (opt)
-		head_room += opt->opt_nflen + opt->opt_flen;
-
-	if (unlikely(skb_headroom(skb) < head_room)) {
-		struct sk_buff *skb2 = skb_realloc_headroom(skb, head_room);
-		if (!skb2) {
-			IP6_INC_STATS(net, ip6_dst_idev(skb_dst(skb)),
-				      IPSTATS_MIB_OUTDISCARDS);
-			kfree_skb(skb);
-			return -ENOBUFS;
-		}
-		if (skb->sk)
-			skb_set_owner_w(skb2, skb->sk);
-		consume_skb(skb);
-		skb = skb2;
-	}
-
 	if (opt) {
-		seg_len += opt->opt_nflen + opt->opt_flen;
+		unsigned int head_room;
 
+		/* First: exthdrs may take lots of space (~8K for now)
+		   MAX_HEADER is not enough.
+		 */
+		head_room = opt->opt_nflen + opt->opt_flen;
+		seg_len += head_room;
+		head_room += sizeof(struct ipv6hdr) + LL_RESERVED_SPACE(dst->dev);
+
+		if (skb_headroom(skb) < head_room) {
+			struct sk_buff *skb2 = skb_realloc_headroom(skb, head_room);
+			if (skb2 == NULL) {
+				IP6_INC_STATS(net, ip6_dst_idev(skb_dst(skb)),
+					      IPSTATS_MIB_OUTDISCARDS);
+				kfree_skb(skb);
+				return -ENOBUFS;
+			}
+			consume_skb(skb);
+			skb = skb2;
+			skb_set_owner_w(skb, sk);
+		}
 		if (opt->opt_flen)
 			ipv6_push_frag_opts(skb, opt, &proto);
-
 		if (opt->opt_nflen)
 			ipv6_push_nfrag_opts(skb, opt, &proto, &first_hop);
 	}
@@ -533,8 +532,6 @@ static void ip6_copy_metadata(struct sk_buff *to, struct sk_buff *from)
 	skb_dst_set(to, dst_clone(skb_dst(from)));
 	to->dev = from->dev;
 	to->mark = from->mark;
-
-	skb_copy_hash(to, from);
 
 #ifdef CONFIG_NET_SCHED
 	to->tc_index = from->tc_index;
@@ -1154,7 +1151,7 @@ int ip6_append_data(struct sock *sk, int getfrag(void *from, char *to,
 	struct ipv6_pinfo *np = inet6_sk(sk);
 	struct inet_cork *cork;
 	struct sk_buff *skb, *skb_prev = NULL;
-	unsigned int maxfraglen, fragheaderlen, mtu, orig_mtu, pmtu;
+	unsigned int maxfraglen, fragheaderlen, mtu, orig_mtu;
 	int exthdrlen;
 	int dst_exthdrlen;
 	int hh_len;
@@ -1212,10 +1209,10 @@ int ip6_append_data(struct sock *sk, int getfrag(void *from, char *to,
 		np->cork.tclass = tclass;
 		if (rt->dst.flags & DST_XFRM_TUNNEL)
 			mtu = np->pmtudisc >= IPV6_PMTUDISC_PROBE ?
-			      READ_ONCE(rt->dst.dev->mtu) : dst_mtu(&rt->dst);
+			      ACCESS_ONCE(rt->dst.dev->mtu) : dst_mtu(&rt->dst);
 		else
 			mtu = np->pmtudisc >= IPV6_PMTUDISC_PROBE ?
-			      READ_ONCE(rt->dst.dev->mtu) : dst_mtu(rt->dst.path);
+			      ACCESS_ONCE(rt->dst.dev->mtu) : dst_mtu(rt->dst.path);
 		if (np->frag_size < mtu) {
 			if (np->frag_size)
 				mtu = np->frag_size;
@@ -1262,12 +1259,6 @@ int ip6_append_data(struct sock *sk, int getfrag(void *from, char *to,
 		else
 			maxnonfragsize = mtu;
 
-		/* as per RFC 7112 section 5, the entire IPv6 Header Chain must fit
-		 * the first fragment
-		 */
-		if (headersize + transhdrlen > mtu)
-			goto emsgsize;
-
 		/* dontfrag active */
 		if ((cork->length + length > mtu - headersize) && dontfrag &&
 		    (sk->sk_protocol == IPPROTO_UDP ||
@@ -1279,8 +1270,9 @@ int ip6_append_data(struct sock *sk, int getfrag(void *from, char *to,
 
 		if (cork->length + length > maxnonfragsize - headersize) {
 emsgsize:
-			pmtu = max_t(int, mtu - headersize + sizeof(struct ipv6hdr), 0);
-			ipv6_local_error(sk, EMSGSIZE, fl6, pmtu);
+			ipv6_local_error(sk, EMSGSIZE, fl6,
+					 mtu - headersize +
+					 sizeof(struct ipv6hdr));
 			return -EMSGSIZE;
 		}
 	}
@@ -1465,8 +1457,7 @@ alloc_new_skb:
 		if (copy > length)
 			copy = length;
 
-		if (!(rt->dst.dev->features&NETIF_F_SG) &&
-		    skb_tailroom(skb) >= copy) {
+		if (!(rt->dst.dev->features&NETIF_F_SG)) {
 			unsigned int off;
 
 			off = skb->len;

@@ -710,7 +710,7 @@ release_sk1:
  */
 
 static void tcp_v4_send_ack(const struct sock *sk, struct sk_buff *skb,
-				u32 seq, u32 ack,
+			    u32 seq, u32 ack,
 			    u32 win, u32 tsval, u32 tsecr, int oif,
 			    struct tcp_md5sig_key *key,
 			    int reply_flags, u8 tos)

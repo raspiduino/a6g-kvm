@@ -52,7 +52,9 @@
 
 #define MAX_LOG 25
 #define READ 0
+#ifndef WRITE
 #define WRITE 1
+#endif 
 
 static u8 sm5703_log_cnt;
 static u8 sm5703_log[MAX_LOG][3];
@@ -60,7 +62,9 @@ static u8 sm5703_log[MAX_LOG][3];
 static int sm5703_i2c_read_byte(const struct i2c_client *client, u8 command);
 static int sm5703_i2c_write_byte(const struct i2c_client *client,
 			u8 command, u8 value);
-
+#if defined (CONFIG_MUIC_SM5703_MHL_WA)
+static int sm5703_muic_reg_init(struct sm5703_muic_data *muic_data);
+#endif
 static void sm5703_reg_log(u8 reg, u8 value, u8 rw)
 {
 	sm5703_log[sm5703_log_cnt][0]=reg;
@@ -1558,9 +1562,19 @@ static void sm5703_muic_detect_dev(struct sm5703_muic_data *muic_data)
 
 	if (val3 & DEV_TYPE3_MHL)
 	{
+#if defined (CONFIG_MUIC_SM5703_MHL_WA)
+		sm5703_print_reg_dump(muic_data);
+
+		pr_info("%s : MHL DETECTED : MUIC Reset\n", MUIC_DEV_NAME);
+		sm5703_i2c_write_byte(i2c, SM5703_MUIC_REG_RESET, 0x01);
+		sm5703_muic_reg_init(muic_data);
+		set_int_mask(muic_data, false);
+		return;
+#else
 		intr = MUIC_INTR_ATTACH;
 		new_dev = ATTACHED_DEV_UNDEFINED_CHARGING_MUIC;
 		pr_info("%s : UNDEFINED VB DETECTED\n", MUIC_DEV_NAME);
+#endif
 	}
 
 	/* If there is no matching device found using device type registers
@@ -1792,6 +1806,7 @@ static void sm5703_muic_init_detect(struct work_struct *work)
 {
 	struct sm5703_muic_data *muic_data =
 		container_of(work, struct sm5703_muic_data, init_work.work);
+	int adc;
 
 	pr_info("%s:%s\n", MUIC_DEV_NAME, __func__);
 
@@ -1799,6 +1814,22 @@ static void sm5703_muic_init_detect(struct work_struct *work)
 	set_int_mask(muic_data, false);
 
 	sm5703_muic_irq_thread(-1, muic_data);
+
+	adc = sm5703_i2c_read_byte(muic_data->i2c, SM5703_MUIC_REG_ADC);
+	pr_info("%s: adc = 0x%x\n", __func__, adc);
+
+	/* MHL adc = 0x20 ( 100000 ) */
+	if (adc == 0x20) {
+		pr_info("%s: MUIC Reset\n", __func__);
+
+		/* MUIC reset */
+		sm5703_i2c_write_byte(muic_data->i2c, SM5703_MUIC_REG_RESET, 0x01);
+
+		sm5703_muic_reg_init(muic_data);
+
+		/* MUIC Interrupt On */
+		set_int_mask(muic_data, false);
+	}
 }
 
 static int sm5703_init_rev_info(struct sm5703_muic_data *muic_data)

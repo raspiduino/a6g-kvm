@@ -235,7 +235,7 @@ ext4_xattr_check_block(struct inode *inode, struct buffer_head *bh)
 
 static int
 __xattr_check_inode(struct inode *inode, struct ext4_xattr_ibody_header *header,
-			 void *end)
+			 void *end, const char *function, unsigned int line)
 {
 	struct ext4_xattr_entry *entry = IFIRST(header);
 	int error = -EIO;
@@ -245,11 +245,14 @@ __xattr_check_inode(struct inode *inode, struct ext4_xattr_ibody_header *header,
 		goto errout;
 	error = ext4_xattr_check_names(entry, end, entry);
 errout:
+	if (error)
+		__ext4_error_inode(inode, function, line, 0,
+				   "corrupted in-inode xattr");
 	return error;
 }
 
 #define xattr_check_inode(inode, header, end) \
-	__xattr_check_inode((inode), (header), (end))
+	__xattr_check_inode((inode), (header), (end), __func__, __LINE__)
 
 static inline int
 ext4_xattr_check_entry(struct ext4_xattr_entry *entry, size_t size)
@@ -363,7 +366,7 @@ ext4_xattr_ibody_get(struct inode *inode, int name_index, const char *name,
 	header = IHDR(inode, raw_inode);
 	entry = IFIRST(header);
 	end = (void *)raw_inode + EXT4_SB(inode->i_sb)->s_inode_size;
-	error = ext4_xattr_check_names(entry, end, entry);
+	error = xattr_check_inode(inode, header, end);
 	if (error) {
 		print_iloc_info(inode->i_sb, iloc);
 		__ext4_error_inode(inode, __func__, __LINE__, 0,
@@ -500,7 +503,7 @@ ext4_xattr_ibody_list(struct dentry *dentry, char *buffer, size_t buffer_size)
 	raw_inode = ext4_raw_inode(&iloc);
 	header = IHDR(inode, raw_inode);
 	end = (void *)raw_inode + EXT4_SB(inode->i_sb)->s_inode_size;
-	error = ext4_xattr_check_names(IFIRST(header), end, IFIRST(header));
+	error = xattr_check_inode(inode, header, end);
 	if (error) {
 		print_iloc_info(inode->i_sb, iloc);
 		__ext4_error_inode(inode, __func__, __LINE__, 0,
@@ -1028,8 +1031,7 @@ int ext4_xattr_ibody_find(struct inode *inode, struct ext4_xattr_info *i,
 	is->s.here = is->s.first;
 	is->s.end = (void *)raw_inode + EXT4_SB(inode->i_sb)->s_inode_size;
 	if (ext4_test_inode_state(inode, EXT4_STATE_XATTR)) {
-		error = ext4_xattr_check_names(IFIRST(header), is->s.end,
-					       IFIRST(header));
+		error = xattr_check_inode(inode, header, is->s.end);
 		if (error) {
 			print_iloc_info(inode->i_sb, is->iloc);
 			__ext4_error_inode(inode, __func__, __LINE__, 0,
@@ -1079,7 +1081,8 @@ static int ext4_xattr_ibody_set(handle_t *handle, struct inode *inode,
 	struct ext4_xattr_search *s = &is->s;
 	int error;
 
-	if (EXT4_I(inode)->i_extra_isize == 0)
+	if (EXT4_I(inode)->i_extra_isize == 0 ||
+			(void *) EXT4_XATTR_NEXT(s->first) >= s->end)
 		return -ENOSPC;
 	error = ext4_xattr_set_entry(i, s, inode);
 	if (error)
@@ -1125,14 +1128,16 @@ ext4_xattr_set_handle(handle_t *handle, struct inode *inode, int name_index,
 	struct ext4_xattr_block_find bs = {
 		.s = { .not_found = -ENODATA, },
 	};
-	int no_expand;
+	unsigned long no_expand;
 	int error;
 
 	if (!name)
 		return -EINVAL;
 	if (strlen(name) > 255)
 		return -ERANGE;
-	ext4_write_lock_xattr(inode, &no_expand);
+	down_write(&EXT4_I(inode)->xattr_sem);
+	no_expand = ext4_test_inode_state(inode, EXT4_STATE_NO_EXPAND);
+	ext4_set_inode_state(inode, EXT4_STATE_NO_EXPAND);
 
 	error = ext4_reserve_inode_write(handle, inode, &is.iloc);
 	if (error)
@@ -1175,8 +1180,6 @@ ext4_xattr_set_handle(handle_t *handle, struct inode *inode, int name_index,
 			error = ext4_xattr_block_set(handle, inode, &i, &bs);
 		} else if (error == -ENOSPC) {
 			if (EXT4_I(inode)->i_file_acl && !bs.s.base) {
-				brelse(bs.bh);
-				bs.bh = NULL;
 				error = ext4_xattr_block_find(inode, &i, &bs);
 				if (error)
 					goto cleanup;
@@ -1195,7 +1198,7 @@ ext4_xattr_set_handle(handle_t *handle, struct inode *inode, int name_index,
 		ext4_xattr_update_super_block(handle, inode->i_sb);
 		inode->i_ctime = ext4_current_time(inode);
 		if (!value)
-			no_expand = 0;
+			ext4_clear_inode_state(inode, EXT4_STATE_NO_EXPAND);
 		error = ext4_mark_iloc_dirty(handle, inode, &is.iloc);
 		/*
 		 * The bh is consumed by ext4_mark_iloc_dirty, even with
@@ -1209,7 +1212,9 @@ ext4_xattr_set_handle(handle_t *handle, struct inode *inode, int name_index,
 cleanup:
 	brelse(is.iloc.bh);
 	brelse(bs.bh);
-	ext4_write_unlock_xattr(inode, &no_expand);
+	if (no_expand == 0)
+		ext4_clear_inode_state(inode, EXT4_STATE_NO_EXPAND);
+	up_write(&EXT4_I(inode)->xattr_sem);
 	return error;
 }
 
@@ -1292,11 +1297,12 @@ int ext4_expand_extra_isize_ea(struct inode *inode, int new_extra_isize,
 	void *base, *start, *end;
 	int extra_isize = 0, error = 0, tried_min_extra_isize = 0;
 	int s_min_extra_isize = le16_to_cpu(EXT4_SB(inode->i_sb)->s_es->s_min_extra_isize);
-	int no_expand;
 
-	if (ext4_write_trylock_xattr(inode, &no_expand) == 0)
-		return 0;
-
+	down_write(&EXT4_I(inode)->xattr_sem);
+	/*
+	 * Set EXT4_STATE_NO_EXPAND to avoid recursion when marking inode dirty
+	 */
+	ext4_set_inode_state(inode, EXT4_STATE_NO_EXPAND);
 retry:
 	if (EXT4_I(inode)->i_extra_isize >= new_extra_isize)
 		goto out;
@@ -1400,11 +1406,6 @@ retry:
 		/* Find the entry best suited to be pushed into EA block */
 		entry = NULL;
 		for (; !IS_LAST_ENTRY(last); last = EXT4_XATTR_NEXT(last)) {
-			/* never move system.data out of the inode */
-			if ((last->e_name_len == 4) &&
-			    (last->e_name_index == EXT4_XATTR_INDEX_SYSTEM) &&
-			    !memcmp(last->e_name, "data", 4))
-				continue;
 			total_size =
 			EXT4_XATTR_SIZE(le32_to_cpu(last->e_value_size)) +
 					EXT4_XATTR_LEN(last->e_name_len);
@@ -1502,7 +1503,8 @@ retry:
 	}
 	brelse(bh);
 out:
-	ext4_write_unlock_xattr(inode, &no_expand);
+	ext4_clear_inode_state(inode, EXT4_STATE_NO_EXPAND);
+	up_write(&EXT4_I(inode)->xattr_sem);
 	return 0;
 
 cleanup:
@@ -1510,16 +1512,14 @@ cleanup:
 	kfree(buffer);
 	if (is)
 		brelse(is->iloc.bh);
-	if (bs)
-		brelse(bs->bh);
 	kfree(is);
 	kfree(bs);
 	brelse(bh);
 	/*
-	 * Inode size expansion failed; don't try again
+	 * We deliberately leave EXT4_STATE_NO_EXPAND set here since inode
+	 * size expansion failed.
 	 */
-	no_expand = 1;
-	ext4_write_unlock_xattr(inode, &no_expand);
+	up_write(&EXT4_I(inode)->xattr_sem);
 	return error;
 }
 

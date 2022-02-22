@@ -144,7 +144,7 @@ out:
 static int
 smb2_reconnect(__le16 smb2_command, struct cifs_tcon *tcon)
 {
-	int rc;
+	int rc = 0;
 	struct nls_table *nls_codepage;
 	struct cifs_ses *ses;
 	struct TCP_Server_Info *server;
@@ -155,10 +155,10 @@ smb2_reconnect(__le16 smb2_command, struct cifs_tcon *tcon)
 	 * for those three - in the calling routine.
 	 */
 	if (tcon == NULL)
-		return 0;
+		return rc;
 
 	if (smb2_command == SMB2_TREE_CONNECT)
-		return 0;
+		return rc;
 
 	if (tcon->tidStatus == CifsExiting) {
 		/*
@@ -201,14 +201,8 @@ smb2_reconnect(__le16 smb2_command, struct cifs_tcon *tcon)
 			return -EAGAIN;
 		}
 
-		rc = wait_event_interruptible_timeout(server->response_q,
-						      (server->tcpStatus != CifsNeedReconnect),
-						      10 * HZ);
-		if (rc < 0) {
-			cifs_dbg(FYI, "%s: aborting reconnect due to a received"
-				 " signal by the process\n", __func__);
-			return -ERESTARTSYS;
-		}
+		wait_event_interruptible_timeout(server->response_q,
+			(server->tcpStatus != CifsNeedReconnect), 10 * HZ);
 
 		/* are we still trying to reconnect? */
 		if (server->tcpStatus != CifsNeedReconnect)
@@ -226,7 +220,7 @@ smb2_reconnect(__le16 smb2_command, struct cifs_tcon *tcon)
 	}
 
 	if (!tcon->ses->need_reconnect && !tcon->need_reconnect)
-		return 0;
+		return rc;
 
 	nls_codepage = load_nls_default();
 
@@ -301,7 +295,7 @@ small_smb2_init(__le16 smb2_command, struct cifs_tcon *tcon,
 	smb2_hdr_assemble((struct smb2_hdr *) *request_buf, smb2_command, tcon);
 
 	if (tcon != NULL) {
-#ifdef CONFIG_CIFS_STATS
+#ifdef CONFIG_CIFS_STATS2
 		uint16_t com_code = le16_to_cpu(smb2_command);
 		cifs_stats_inc(&tcon->stats.smb2_stats.smb2_com_sent[com_code]);
 #endif
@@ -513,7 +507,8 @@ int smb3_validate_negotiate(const unsigned int xid, struct cifs_tcon *tcon)
 	}
 
 	/* check validate negotiate info response matches what we got earlier */
-	if (pneg_rsp->Dialect != cpu_to_le16(tcon->ses->server->dialect))
+	if (pneg_rsp->Dialect !=
+			cpu_to_le16(tcon->ses->server->vals->protocol_id))
 		goto vneg_out;
 
 	if (pneg_rsp->SecurityMode != cpu_to_le16(tcon->ses->server->sec_mode))
@@ -927,19 +922,15 @@ SMB2_tcon(const unsigned int xid, struct cifs_ses *ses, const char *tree,
 		goto tcon_exit;
 	}
 
-	switch (rsp->ShareType) {
-	case SMB2_SHARE_TYPE_DISK:
+	if (rsp->ShareType & SMB2_SHARE_TYPE_DISK)
 		cifs_dbg(FYI, "connection to disk share\n");
-		break;
-	case SMB2_SHARE_TYPE_PIPE:
+	else if (rsp->ShareType & SMB2_SHARE_TYPE_PIPE) {
 		tcon->ipc = true;
 		cifs_dbg(FYI, "connection to pipe share\n");
-		break;
-	case SMB2_SHARE_TYPE_PRINT:
-		tcon->ipc = true;
+	} else if (rsp->ShareType & SMB2_SHARE_TYPE_PRINT) {
+		tcon->print = true;
 		cifs_dbg(FYI, "connection to printer\n");
-		break;
-	default:
+	} else {
 		cifs_dbg(VFS, "unknown share type %d\n", rsp->ShareType);
 		rc = -EOPNOTSUPP;
 		goto tcon_error_exit;
@@ -2188,38 +2179,33 @@ num_entries(char *bufstart, char *end_of_buf, char **lastentry, size_t size)
 	int len;
 	unsigned int entrycount = 0;
 	unsigned int next_offset = 0;
-	char *entryptr;
-	FILE_DIRECTORY_INFO *dir_info;
+	FILE_DIRECTORY_INFO *entryptr;
 
 	if (bufstart == NULL)
 		return 0;
 
-	entryptr = bufstart;
+	entryptr = (FILE_DIRECTORY_INFO *)bufstart;
 
 	while (1) {
-		if (entryptr + next_offset < entryptr ||
-		    entryptr + next_offset > end_of_buf ||
-		    entryptr + next_offset + size > end_of_buf) {
+		entryptr = (FILE_DIRECTORY_INFO *)
+					((char *)entryptr + next_offset);
+
+		if ((char *)entryptr + size > end_of_buf) {
 			cifs_dbg(VFS, "malformed search entry would overflow\n");
 			break;
 		}
 
-		entryptr = entryptr + next_offset;
-		dir_info = (FILE_DIRECTORY_INFO *)entryptr;
-
-		len = le32_to_cpu(dir_info->FileNameLength);
-		if (entryptr + len < entryptr ||
-		    entryptr + len > end_of_buf ||
-		    entryptr + len + size > end_of_buf) {
+		len = le32_to_cpu(entryptr->FileNameLength);
+		if ((char *)entryptr + len + size > end_of_buf) {
 			cifs_dbg(VFS, "directory entry name would overflow frame end of buf %p\n",
 				 end_of_buf);
 			break;
 		}
 
-		*lastentry = entryptr;
+		*lastentry = (char *)entryptr;
 		entrycount++;
 
-		next_offset = le32_to_cpu(dir_info->NextEntryOffset);
+		next_offset = le32_to_cpu(entryptr->NextEntryOffset);
 		if (!next_offset)
 			break;
 	}

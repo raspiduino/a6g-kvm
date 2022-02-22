@@ -1,13 +1,10 @@
-/* linux/drivers/video/backlight/s6d7aa0_gtactive2_mipi_lcd.c
- *
- * Samsung SoC MIPI LCD CONTROL functions
- *
- * Copyright (c) 2015 Samsung Electronics
+/*
+ * Copyright (c) Samsung Electronics Co., Ltd.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
-*/
+ */
 
 #include <linux/lcd.h>
 #include <linux/backlight.h>
@@ -20,7 +17,7 @@
 #include "../decon_notify.h"
 
 #include "s6d7aa0_gtactive2_param.h"
-#include "backlight_tuning.h"
+#include "dd.h"
 
 #if defined(CONFIG_EXYNOS_DECON_MDNIE_LITE)
 #include "mdnie.h"
@@ -44,7 +41,6 @@ struct lcd_info {
 		};
 		u32			value;
 	} id_info;
-	unsigned char			dump_info[3];
 
 	int				lux;
 	struct class			*mdnie_class;
@@ -81,7 +77,7 @@ try_write:
 	return ret;
 }
 
-#if defined(CONFIG_EXYNOS_DECON_MDNIE_LITE)
+#if defined(CONFIG_SEC_FACTORY) || defined(CONFIG_EXYNOS_DECON_MDNIE_LITE)
 static int dsim_read_hl_data(struct lcd_info *lcd, u8 addr, u32 size, u8 *buf)
 {
 	int ret = 0, rx_size = 0;
@@ -403,7 +399,7 @@ static ssize_t window_type_show(struct device *dev,
 {
 	struct lcd_info *lcd = dev_get_drvdata(dev);
 
-	sprintf(buf, "%x %x %x\n", lcd->id_info.id[0], lcd->id_info.id[1], lcd->id_info.id[2]);
+	sprintf(buf, "%02x %02x %02x\n", lcd->id_info.id[0], lcd->id_info.id[1], lcd->id_info.id[2]);
 
 	return strlen(buf);
 }
@@ -479,7 +475,7 @@ static void lcd_init_sysfs(struct lcd_info *lcd)
 	if (ret < 0)
 		dev_err(&lcd->ld->dev, "failed to add lcd sysfs\n");
 
-	init_bl_curve_debugfs(lcd->bd, brightness_table, NULL);
+	init_debugfs_backlight(lcd->bd, brightness_table, NULL);
 }
 
 #if defined(CONFIG_EXYNOS_DECON_MDNIE_LITE)

@@ -202,8 +202,6 @@ struct cfs_bandwidth {
 	/* statistics */
 	int nr_periods, nr_throttled;
 	u64 throttled_time;
-
-	bool distribute_running;
 #endif
 };
 
@@ -327,7 +325,8 @@ struct cfs_rq {
 	u64 min_vruntime_copy;
 #endif
 
-	struct rb_root_cached tasks_timeline;
+	struct rb_root tasks_timeline;
+	struct rb_node *rb_leftmost;
 
 	/*
 	 * 'curr' points to currently running entity on this cfs_rq.
@@ -1004,10 +1003,9 @@ static inline void finish_lock_switch(struct rq *rq, struct task_struct *prev)
 	 * After ->on_cpu is cleared, the task can be moved to a different CPU.
 	 * We must ensure this doesn't happen until the switch is completely
 	 * finished.
-	 *
-	 * Pairs with the control dependency and rmb in try_to_wake_up().
 	 */
-	smp_store_release(&prev->on_cpu, 0);
+	smp_wmb();
+	prev->on_cpu = 0;
 #endif
 #ifdef CONFIG_DEBUG_SPINLOCK
 	/* this is a valid case when another task releases the spinlock */

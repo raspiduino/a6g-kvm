@@ -1734,10 +1734,6 @@ static ssize_t sysfs_blk_trace_attr_store(struct device *dev,
 	mutex_lock(&bdev->bd_mutex);
 
 	if (attr == &dev_attr_enable) {
-		if (!!value == !!q->blk_trace) {
-			ret = 0;
-			goto out_unlock_bdev;
-		}
 		if (value)
 			ret = blk_trace_setup_queue(q, bdev);
 		else
@@ -1807,6 +1803,8 @@ void blk_dump_cmd(char *buf, struct request *rq)
 	}
 }
 
+SIO_PATCH_VERSION(ftrace_discard_bugfix, 1, 0, "");
+
 void blk_fill_rwbs(char *rwbs, u32 rw, int bytes)
 {
 	int i = 0;
@@ -1814,10 +1812,10 @@ void blk_fill_rwbs(char *rwbs, u32 rw, int bytes)
 	if (rw & REQ_FLUSH)
 		rwbs[i++] = 'F';
 
-	if (rw & WRITE)
-		rwbs[i++] = 'W';
-	else if (rw & REQ_DISCARD)
+	if (rw & REQ_DISCARD)
 		rwbs[i++] = 'D';
+	else if (rw & WRITE)
+		rwbs[i++] = 'W';
 	else if (bytes)
 		rwbs[i++] = 'R';
 	else

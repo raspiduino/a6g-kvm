@@ -1,13 +1,10 @@
-/* linux/drivers/video/backlight/s6d7aa0_degas2_mipi_lcd.c
- *
- * Samsung SoC MIPI LCD CONTROL functions
- *
- * Copyright (c) 2015 Samsung Electronics
+/*
+ * Copyright (c) Samsung Electronics Co., Ltd.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
-*/
+ */
 
 #include <linux/lcd.h>
 #include <linux/backlight.h>
@@ -44,7 +41,6 @@ struct lcd_info {
 		};
 		u32			value;
 	} id_info;
-	unsigned char			dump_info[3];
 
 	struct dsim_device		*dsim;
 	struct mutex			lock;
@@ -77,6 +73,7 @@ try_write:
 	return ret;
 }
 
+#if defined(CONFIG_SEC_FACTORY) || defined(CONFIG_EXYNOS_DECON_MDNIE_LITE)
 static int dsim_read_hl_data(struct lcd_info *lcd, u8 addr, u32 size, u8 *buf)
 {
 	int ret = 0, rx_size = 0;
@@ -99,6 +96,7 @@ try_read:
 
 	return ret;
 }
+#endif
 
 static int dsim_panel_set_brightness(struct lcd_info *lcd, int force)
 {
@@ -310,7 +308,7 @@ static int s6d7aa0_init(struct lcd_info *lcd)
 		dev_err(&lcd->ld->dev, "%s: failed to write CMD : SEQ_PORCH_CTL\n", __func__);
 		goto init_exit;
 	}
-	msleep(10);
+	usleep_range(10000, 11000);
 	ret = dsim_write_hl_data(lcd, SEQ_SLEEP_OUT, ARRAY_SIZE(SEQ_SLEEP_OUT));
 	if (ret < 0) {
 		dev_err(&lcd->ld->dev, "%s: failed to write CMD : SEQ_SLEEP_OUT\n", __func__);
@@ -377,7 +375,7 @@ static ssize_t window_type_show(struct device *dev,
 {
 	struct lcd_info *lcd = dev_get_drvdata(dev);
 
-	sprintf(buf, "%x %x %x\n", lcd->id_info.id[0], lcd->id_info.id[1], lcd->id_info.id[2]);
+	sprintf(buf, "%02x %02x %02x\n", lcd->id_info.id[0], lcd->id_info.id[1], lcd->id_info.id[2]);
 
 	return strlen(buf);
 }

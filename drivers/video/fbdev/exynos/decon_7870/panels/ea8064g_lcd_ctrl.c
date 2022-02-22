@@ -1,14 +1,10 @@
 /*
- * drivers/video/decon_7580/panels/ea8064g_lcd_ctrl.c
- *
- * Samsung SoC MIPI LCD CONTROL functions
- *
- * Copyright (c) 2015 Samsung Electronics
+ * Copyright (c) Samsung Electronics Co., Ltd.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
-*/
+ */
 
 #include <linux/lcd.h>
 #include <linux/backlight.h>
@@ -51,7 +47,6 @@ struct lcd_info {
 	unsigned int acl_enable;
 	unsigned int current_acl;
 	unsigned int current_hbm;
-	unsigned char dump_info[3];
 	int lux;
 	struct class *mdnie_class;
 
@@ -111,24 +106,6 @@ try_read:
 			ret = -EPERM;
 		}
 	}
-
-	return ret;
-}
-
-static int dsim_read_hl_data_offset(struct lcd_info *lcd, u8 addr, u32 size, u8 *buf, u32 offset)
-{
-	unsigned char wbuf[] = {0xB0, 0};
-	int ret = 0;
-
-	wbuf[1] = offset;
-
-	ret = dsim_write_hl_data(lcd, wbuf, ARRAY_SIZE(wbuf));
-	if (ret < 0)
-		dev_err(&lcd->ld->dev, "%s: failed to write wbuf\n", __func__);
-
-	ret = dsim_read_hl_data(lcd, addr, size, buf);
-	if (ret < 0)
-		dev_err(&lcd->ld->dev, "%s: fail\n", __func__);
 
 	return ret;
 }
@@ -366,9 +343,9 @@ static int low_level_set_brightness(struct lcd_info *lcd, int force)
 	dsim_panel_set_hbm(lcd, force);
 
 	if (dsim_write_hl_data(lcd, SEQ_TEST_KEY_OFF_FC, ARRAY_SIZE(SEQ_TEST_KEY_OFF_FC)) < 0)
-			dev_err(&lcd->ld->dev, "%s: failed to write FC on command.\n", __func__);
+		dev_err(&lcd->ld->dev, "%s: failed to write FC on command.\n", __func__);
 	if (dsim_write_hl_data(lcd, SEQ_TEST_KEY_OFF_F1, ARRAY_SIZE(SEQ_TEST_KEY_OFF_F1)) < 0)
-			dev_err(&lcd->ld->dev, "%s: failed to write F1 on command.\n", __func__);
+		dev_err(&lcd->ld->dev, "%s: failed to write F1 on command.\n", __func__);
 	if (dsim_write_hl_data(lcd, SEQ_TEST_KEY_OFF_F0, ARRAY_SIZE(SEQ_TEST_KEY_OFF_F0)) < 0)
 		dev_err(&lcd->ld->dev, "%s: failed to write F0 on command\n", __func__);
 
@@ -927,7 +904,7 @@ static ssize_t window_type_show(struct device *dev,
 {
 	struct lcd_info *lcd = dev_get_drvdata(dev);
 
-	sprintf(buf, "%x %x %x\n", lcd->id_info.id[0], lcd->id_info.id[1], lcd->id_info.id[2]);
+	sprintf(buf, "%02x %02x %02x\n", lcd->id_info.id[0], lcd->id_info.id[1], lcd->id_info.id[2]);
 
 	return strlen(buf);
 }
@@ -1082,85 +1059,6 @@ static ssize_t cell_id_show(struct device *dev,
 	return strlen(buf);
 }
 
-static ssize_t dump_register_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	struct lcd_info *lcd = dev_get_drvdata(dev);
-	char *pos = buf;
-	u8 reg, len, offset;
-	int ret, i;
-	u8 *dump = NULL;
-
-	reg = lcd->dump_info[0];
-	len = lcd->dump_info[1];
-	offset = lcd->dump_info[2];
-
-	if (!reg || !len || reg > 0xff || len > 255 || offset > 255)
-		goto exit;
-
-	dump = kcalloc(len, sizeof(u8), GFP_KERNEL);
-
-	if (lcd->state == PANEL_STATE_RESUMED) {
-		if (dsim_write_hl_data(lcd, SEQ_TEST_KEY_ON_F0, ARRAY_SIZE(SEQ_TEST_KEY_ON_F0)) < 0)
-			dev_err(&lcd->ld->dev, "failed to write test on f0 command.\n");
-		if (dsim_write_hl_data(lcd, SEQ_TEST_KEY_ON_FC, ARRAY_SIZE(SEQ_TEST_KEY_ON_FC)) < 0)
-			dev_err(&lcd->ld->dev, "failed to write test on fc command.\n");
-
-		ret = dsim_read_hl_data_offset(lcd, reg, len, dump, offset);
-		if (ret < 0) {
-			dev_err(&lcd->ld->dev, "%s: failed to read, %x, %d, %d\n", __func__, reg, len, offset);
-			goto exit;
-		}
-
-		if (dsim_write_hl_data(lcd, SEQ_TEST_KEY_OFF_FC, ARRAY_SIZE(SEQ_TEST_KEY_OFF_FC)) < 0)
-			dev_err(&lcd->ld->dev, "failed to write test off fc command.\n");
-		if (dsim_write_hl_data(lcd, SEQ_TEST_KEY_OFF_F0, ARRAY_SIZE(SEQ_TEST_KEY_OFF_F0)) < 0)
-			dev_err(&lcd->ld->dev, "failed to write test off f0 command.\n");
-	}
-
-	pos += sprintf(pos, "+ [%02X]\n", reg);
-	for (i = 0; i < len; i++)
-		pos += sprintf(pos, "%2d: %02x\n", i + offset + 1, dump[i]);
-	pos += sprintf(pos, "- [%02X]\n", reg);
-
-	dev_info(&lcd->ld->dev, "+ [%02X]\n", reg);
-	for (i = 0; i < len; i++)
-		dev_info(&lcd->ld->dev, "%2d: %02x\n", i + offset + 1, dump[i]);
-	dev_info(&lcd->ld->dev, "- [%02X]\n", reg);
-
-	kfree(dump);
-exit:
-	return pos - buf;
-}
-
-static ssize_t dump_register_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t size)
-{
-	struct lcd_info *lcd = dev_get_drvdata(dev);
-	unsigned int reg, len, offset;
-	int ret;
-
-	ret = sscanf(buf, "%8x %8d %8d", &reg, &len, &offset);
-
-	if (ret == 2)
-		offset = 0;
-
-	dev_info(dev, "%s: %x %d %d\n", __func__, reg, len, offset);
-
-	if (ret < 0)
-		return ret;
-	else {
-		if (!reg || !len || reg > 0xff || len > 255 || offset > 255)
-			return -EINVAL;
-
-		lcd->dump_info[0] = reg;
-		lcd->dump_info[1] = len;
-		lcd->dump_info[2] = offset;
-	}
-
-	return size;
-}
-
 static ssize_t lux_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -1187,7 +1085,9 @@ static ssize_t lux_store(struct device *dev,
 		lcd->lux = value;
 		mutex_unlock(&lcd->lock);
 
+#if defined(CONFIG_EXYNOS_DECON_MDNIE_LITE)
 		attr_store_for_each(lcd->mdnie_class, attr->attr.name, buf, size);
+#endif
 	}
 
 	return size;
@@ -1202,7 +1102,6 @@ static DEVICE_ATTR(temperature, 0664, temperature_show, temperature_store);
 static DEVICE_ATTR(color_coordinate, 0444, color_coordinate_show, NULL);
 static DEVICE_ATTR(manufacture_date, 0444, manufacture_date_show, NULL);
 static DEVICE_ATTR(aid_log, 0444, aid_log_show, NULL);
-static DEVICE_ATTR(dump_register, 0644, dump_register_show, dump_register_store);
 static DEVICE_ATTR(lux, 0644, lux_show, lux_store);
 
 static struct attribute *lcd_sysfs_attributes[] = {
@@ -1215,7 +1114,6 @@ static struct attribute *lcd_sysfs_attributes[] = {
 	&dev_attr_color_coordinate.attr,
 	&dev_attr_manufacture_date.attr,
 	&dev_attr_aid_log.attr,
-	&dev_attr_dump_register.attr,
 	&dev_attr_lux.attr,
 	NULL,
 };

@@ -123,13 +123,6 @@
 #ifdef CONFIG_ANDROID_PARANOID_NETWORK
 #include <linux/android_aid.h>
 
-/* START_OF_KNOX_VPN */
-#include <net/ncm.h>
-#include <linux/kfifo.h>
-#include <asm/current.h>
-#include <linux/pid.h>
-/* END_OF_KNOX_VPN */
-
 static inline int current_has_network(void)
 {
 	return in_egroup_p(AID_INET) || capable(CAP_NET_RAW);
@@ -285,6 +278,9 @@ static int inet_create(struct net *net, struct socket *sock, int protocol,
 
 	if (!current_has_network())
 		return -EACCES;
+
+	if (protocol < 0 || protocol >= IPPROTO_MAX)
+		return -EINVAL;
 
 	sock->state = SS_UNCONNECTED;
 
@@ -763,13 +759,6 @@ int inet_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 
     err = sk->sk_prot->sendmsg(iocb, sk, msg, size);
 
-    if (err >= 0) {
-        if(sock->knox_sent + err > ULLONG_MAX) {
-            sock->knox_sent = ULLONG_MAX;
-        } else {
-            sock->knox_sent = sock->knox_sent + err;
-        }
-    }
     return err;
 }
 EXPORT_SYMBOL(inet_sendmsg);
@@ -805,12 +794,7 @@ int inet_recvmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 				   flags & ~MSG_DONTWAIT, &addr_len);
 	if (err >= 0) {
 		msg->msg_namelen = addr_len;
-        if(sock->knox_recv + err > ULLONG_MAX) {
-            sock->knox_recv = ULLONG_MAX;
-        } else {
-            sock->knox_recv = sock->knox_recv + err;
-        }
-    }
+	}
 	return err;
 }
 EXPORT_SYMBOL(inet_recvmsg);
@@ -914,7 +898,6 @@ int inet_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 	case SIOCSIFPFLAGS:
 	case SIOCGIFPFLAGS:
 	case SIOCSIFFLAGS:
-	case SIOCKILLADDR:
 		err = devinet_ioctl(net, cmd, (void __user *)arg);
 		break;
 	default:
@@ -1330,7 +1313,6 @@ static struct sk_buff *inet_gso_segment(struct sk_buff *skb,
 		if (encap)
 			skb_reset_inner_headers(skb);
 		skb->network_header = (u8 *)iph - skb->head;
-		skb_reset_mac_len(skb);
 	} while ((skb = skb->next));
 
 out:

@@ -45,6 +45,7 @@
 #include <linux/security.h>
 #include <linux/string.h>
 #include <linux/list.h>
+#include <linux/ratelimit.h>
 #include <linux/android_aid.h>
 #include "multiuser.h"
 
@@ -88,31 +89,6 @@
 		(x)->i_gid = make_kgid(&init_user_ns, AID_SDCARD_RW);	\
 		(x)->i_mode = ((x)->i_mode & S_IFMT) | 0775;\
 	} while (0)
-
-/* OVERRIDE_CRED() and REVERT_CRED()
- *	OVERRIDE_CRED()
- *		backup original task->cred
- *		and modifies task->cred->fsuid/fsgid to specified value.
- *	REVERT_CRED()
- *		restore original task->cred->fsuid/fsgid.
- * These two macro should be used in pair, and OVERRIDE_CRED() should be
- * placed at the beginning of a function, right after variable declaration.
- */
-#define OVERRIDE_CRED(sdcardfs_sbi, saved_cred, info)		\
-	do {	\
-		saved_cred = override_fsids(sdcardfs_sbi, info->data);	\
-		if (!saved_cred)	\
-			return -ENOMEM;	\
-	} while (0)
-
-#define OVERRIDE_CRED_PTR(sdcardfs_sbi, saved_cred, info)	\
-	do {	\
-		saved_cred = override_fsids(sdcardfs_sbi, info->data);	\
-		if (!saved_cred)	\
-			return ERR_PTR(-ENOMEM);	\
-	} while (0)
-
-#define REVERT_CRED(saved_cred)	revert_fsids(saved_cred)
 
 /* Android 5.0 support */
 
@@ -644,16 +620,16 @@ static inline int check_min_free_space(struct dentry *dentry, size_t size, int d
 
 	if (sbi->options.reserved_mb) {
 		/* Get fs stat of lower filesystem. */
-		sdcardfs_get_lower_path(dentry, &lower_path);
+		sdcardfs_get_lower_path(dentry->d_sb->s_root, &lower_path);
 		err = vfs_statfs(&lower_path, &statfs);
-		sdcardfs_put_lower_path(dentry, &lower_path);
+		sdcardfs_put_lower_path(dentry->d_sb->s_root, &lower_path);
 
 		if (unlikely(err))
-			return 0;
+			goto out_invalid;
 
 		/* Invalid statfs informations. */
 		if (unlikely(statfs.f_bsize == 0))
-			return 0;
+			goto out_invalid;
 
 		/* if you are checking directory, set size to f_bsize. */
 		if (unlikely(dir))
@@ -664,15 +640,34 @@ static inline int check_min_free_space(struct dentry *dentry, size_t size, int d
 
 		/* not enough space */
 		if ((u64)size > avail)
-			return 0;
+			goto out_nospc;
 
 		/* enough space */
 		if ((avail - size) > (sbi->options.reserved_mb * 1024 * 1024))
 			return 1;
 
-		return 0;
+		goto out_nospc;
 	} else
 		return 1;
+
+out_invalid:
+	pr_info("sdcardfs: statfs error  : %d\n", err);
+	pr_info("sdcardfs: f_type        : 0x%X\n", (u32) statfs.f_type);
+	pr_info("sdcardfs: f_blocks      : %llu blocks\n", statfs.f_blocks);
+	pr_info("sdcardfs: f_bfree       : %llu blocks\n", statfs.f_bfree);
+	pr_info("sdcardfs: f_files       : %llu\n", statfs.f_files);
+	pr_info("sdcardfs: f_ffree       : %llu\n", statfs.f_ffree);
+	pr_info("sdcardfs: f_fsid.val[1] : 0x%X\n", (u32) statfs.f_fsid.val[1]);
+	pr_info("sdcardfs: f_fsid.val[0] : 0x%X\n", (u32) statfs.f_fsid.val[0]);
+	pr_info("sdcardfs: f_namelen     : %ld\n", statfs.f_namelen);
+	pr_info("sdcardfs: f_frsize      : %ld\n", statfs.f_frsize);
+	pr_info("sdcardfs: f_flags       : %ld\n", statfs.f_flags);
+	pr_info("sdcardfs: reserved_mb   : %u\n", sbi->options.reserved_mb);
+
+out_nospc:
+	pr_info_ratelimited("sdcardfs: f_bavail: %llu f_bsize: %ld required: %llu\n",
+		statfs.f_bavail, statfs.f_bsize, (u64) size);
+	return 0;
 }
 
 /*

@@ -388,6 +388,9 @@ static void mmc_manage_gp_partitions(struct mmc_card *card, u8 *ext_csd)
 	}
 }
 
+/* Minimum partition switch timeout in milliseconds */
+#define MMC_MIN_PART_SWITCH_TIME	300
+
 /* eMMC 5.0 or later only */
 /*
  * mmc_merge_ext_csd - merge some ext_csd field to a variable.
@@ -419,9 +422,6 @@ static unsigned long long mmc_merge_ext_csd(u8 *ext_csd, bool continuous, int co
 	return merge_ext_csd;
 }
 
-
-/* Minimum partition switch timeout in milliseconds */
-#define MMC_MIN_PART_SWITCH_TIME	300
 
 /*
  * Decode extended CSD.
@@ -704,6 +704,7 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 
 		card->ext_csd.enhanced_strobe_support =
 			ext_csd[EXT_CSD_STORBE_SUPPORT];
+		card->ext_csd.pre_eol_info = ext_csd[EXT_CSD_PRE_EOL_INFO];
 		card->ext_csd.device_life_time_est_typ_a = 
 			ext_csd[EXT_CSD_DEVICE_LIFE_TIME_EST_TYPE_A];
 		card->ext_csd.device_life_time_est_typ_b =
@@ -851,6 +852,11 @@ MMC_DEV_ATTR(manfid, "0x%06x\n", card->cid.manfid);
 MMC_DEV_ATTR(name, "%s\n", card->cid.prod_name);
 MMC_DEV_ATTR(oemid, "0x%04x\n", card->cid.oemid);
 MMC_DEV_ATTR(prv, "0x%x\n", card->cid.prv);
+MMC_DEV_ATTR(rev, "0x%x\n", card->ext_csd.rev);
+MMC_DEV_ATTR(pre_eol_info, "%02x\n", card->ext_csd.pre_eol_info);
+MMC_DEV_ATTR(life_time, "0x%02x 0x%02x\n",
+	card->ext_csd.device_life_time_est_typ_a,
+	card->ext_csd.device_life_time_est_typ_b);
 MMC_DEV_ATTR(serial, "0x%08x\n", card->cid.serial);
 MMC_DEV_ATTR(enhanced_area_offset, "%llu\n",
 		card->ext_csd.enhanced_area_offset);
@@ -887,6 +893,9 @@ static struct attribute *mmc_std_attrs[] = {
 	&dev_attr_name.attr,
 	&dev_attr_oemid.attr,
 	&dev_attr_prv.attr,
+	&dev_attr_rev.attr,
+	&dev_attr_pre_eol_info.attr,
+	&dev_attr_life_time.attr,
 	&dev_attr_serial.attr,
 	&dev_attr_enhanced_area_offset.attr,
 	&dev_attr_enhanced_area_size.attr,
@@ -1245,7 +1254,7 @@ static int mmc_select_hs400(struct mmc_card *card)
 				   card->ext_csd.generic_cmd6_time,
 				   true, true, true);
 		if (err) {
-			pr_err("%s: switch to high-speed from hs200 failed, err:%d\n",
+			pr_warn("%s: switch to high-speed from hs200 failed, err:%d\n",
 				mmc_hostname(host), err);
 			return err;
 		}
@@ -1257,7 +1266,7 @@ static int mmc_select_hs400(struct mmc_card *card)
 			 EXT_CSD_DDR_BUS_WIDTH_8,
 			 card->ext_csd.generic_cmd6_time);
 		if (err) {
-			pr_err("%s: switch to bus width for hs400 failed, err:%d\n",
+			pr_warn("%s: switch to bus width for hs400 failed, err:%d\n",
 				mmc_hostname(host), err);
 			return err;
 		}
@@ -1267,7 +1276,7 @@ static int mmc_select_hs400(struct mmc_card *card)
 			   card->ext_csd.generic_cmd6_time,
 			   true, true, true);
 		if (err) {
-			pr_err("%s: switch to hs400 failed, err:%d\n",
+			pr_warn("%s: switch to hs400 failed, err:%d\n",
 				mmc_hostname(host), err);
 			return err;
 		}

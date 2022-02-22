@@ -26,7 +26,7 @@
 
 #define check_pgt_cache()		do { } while (0)
 
-#if CONFIG_ARM64_PGTABLE_LEVELS > 2
+#if CONFIG_PGTABLE_LEVELS > 2
 
 #ifndef CONFIG_TIMA_RKP
 static inline pmd_t *pmd_alloc_one(struct mm_struct *mm, unsigned long addr)
@@ -52,6 +52,11 @@ static inline pmd_t *pmd_alloc_one(struct mm_struct *mm, unsigned long addr)
 }
 #endif
 
+static inline void __pud_populate(pud_t *pud, phys_addr_t pmd, pudval_t prot)
+{
+	set_pud(pud, __pud(pmd | prot));
+}
+
 #ifndef CONFIG_TIMA_RKP
 static inline void pmd_free(struct mm_struct *mm, pmd_t *pmd)
 {
@@ -75,11 +80,6 @@ static inline void pmd_free(struct mm_struct *mm, pmd_t *pmd)
 }
 #endif
 
-static inline void __pud_populate(pud_t *pud, phys_addr_t pmd, pudval_t prot)
-{
-	set_pud(pud, __pud(pmd | prot));
-}
-
 static inline void pud_populate(struct mm_struct *mm, pud_t *pud, pmd_t *pmd)
 {
 	__pud_populate(pud, __pa(pmd), PMD_TYPE_TABLE);
@@ -89,9 +89,9 @@ static inline void __pud_populate(pud_t *pud, phys_addr_t pmd, pudval_t prot)
 {
 	BUILD_BUG();
 }
-#endif	/* CONFIG_ARM64_PGTABLE_LEVELS > 2 */
+#endif	/* CONFIG_PGTABLE_LEVELS > 2 */
 
-#if CONFIG_ARM64_PGTABLE_LEVELS > 3
+#if CONFIG_PGTABLE_LEVELS > 3
 
 #ifndef CONFIG_TIMA_RKP
 static inline pud_t *pud_alloc_one(struct mm_struct *mm, unsigned long addr)
@@ -152,7 +152,7 @@ static inline void __pgd_populate(pgd_t *pgdp, phys_addr_t pud, pgdval_t prot)
 {
 	BUILD_BUG();
 }
-#endif	/* CONFIG_ARM64_PGTABLE_LEVELS > 3 */
+#endif	/* CONFIG_PGTABLE_LEVELS > 3 */
 
 extern pgd_t *pgd_alloc(struct mm_struct *mm);
 extern void pgd_free(struct mm_struct *mm, pgd_t *pgd);

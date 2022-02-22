@@ -38,7 +38,7 @@ static const struct i2c_rom_data ISL98611_INIT[] = {
 	{0x11, 0x07},
 	{0x12, 0xBF},
 	{0x13, 0x87},
-	{0x14, 0xFD},
+	{0x14, 0xDD},
 	{0x16, 0xF5},
 	{0x17, 0x8D},
 };
@@ -258,6 +258,11 @@ static const unsigned char SEQ_TD4100_53[] = {
 static const unsigned char SEQ_TD4100_55[] = {
 	0x55,
 	0x00,
+};
+
+static const unsigned char SEQ_CABC_MIN[] = {
+	0x5E,
+	0x30,
 };
 
 static const unsigned char SEQ_SLEEP_OUT[] = {

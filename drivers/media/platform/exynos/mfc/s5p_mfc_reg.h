@@ -63,6 +63,9 @@
 #define s5p_mfc_is_interlace_picture()		((MFC_READL(S5P_FIMV_D_DISPLAY_STATUS)		\
 						& S5P_FIMV_DEC_STATUS_INTERLACE_MASK))	\
 						>> S5P_FIMV_DEC_STATUS_INTERLACE_SHIFT
+#define s5p_mfc_is_mbaff_picture()		((MFC_READL(S5P_FIMV_D_H264_INFO)		\
+						>> S5P_FIMV_D_H264_INFO_MBAFF_FRAME_FLAG_SHIFT)\
+						& S5P_FIMV_D_H264_INFO_MBAFF_FRAME_FLAG_MASK)
 #define mfc_get_last_disp_info()		((MFC_READL(S5P_FIMV_D_DISPLAY_STATUS)		\
 						>> S5P_FIMV_DISPLAY_LAST_INFO_SHIFT)	\
 						& S5P_FIMV_DISPLAY_LAST_INFO_MASK)
@@ -97,6 +100,12 @@
 #define s5p_mfc_get_enc_slice_type()		MFC_READL(S5P_FIMV_E_SLICE_TYPE)
 #define s5p_mfc_get_enc_pic_count()		MFC_READL(S5P_FIMV_E_PICTURE_COUNT)
 #define s5p_mfc_get_sei_avail_status()		MFC_READL(S5P_FIMV_D_FRAME_PACK_SEI_AVAIL)
+#define s5p_mfc_get_video_signal_type()		((MFC_READL(S5P_FIMV_D_VIDEO_SIGNAL_TYPE)	\
+						>> S5P_FIMV_D_VIDEO_SIGNAL_TYPE_FLAG_SHIFT)	\
+						& S5P_FIMV_D_VIDEO_SIGNAL_TYPE_FLAG_MASK)
+#define s5p_mfc_get_colour_description()	((MFC_READL(S5P_FIMV_D_VIDEO_SIGNAL_TYPE)	\
+						>> S5P_FIMV_D_COLOUR_DESCRIPTION_FLAG_SHIFT)	\
+						& S5P_FIMV_D_COLOUR_DESCRIPTION_FLAG_MASK)
 #define s5p_mfc_get_black_bar_pos_x()		((MFC_READL(S5P_FIMV_D_BLACK_BAR_START_POS)	\
 						>> S5P_FIMV_D_BLACK_BAR_START_X_SHIFT)		\
 						& S5P_FIMV_D_BLACK_BAR_START_X_MASK)

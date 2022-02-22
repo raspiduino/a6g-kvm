@@ -970,6 +970,7 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
 			struct scatterlist *s;
 			int		i;
 
+			printk(KERN_DEBUG"usb: %s using mapped segments \n",__func__);
 			for_each_sg(sg, s, request->num_mapped_sgs, i) {
 				unsigned chain = true;
 
@@ -1618,6 +1619,8 @@ static int dwc3_udc_init(struct dwc3 *dwc)
 	}
 	dwc3_writel(dwc->regs, DWC3_DCFG, reg);
 
+	dwc->start_config_issued = false;
+
 	/* Start with SuperSpeed Default */
 	dwc3_gadget_ep0_desc.wMaxPacketSize = cpu_to_le16(512);
 
@@ -1782,6 +1785,7 @@ static int dwc3_gadget_vbus_session(struct usb_gadget *g, int is_active)
 		} else {
 #ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
 			dwc3_disconnect_gadget(dwc);
+			dwc->start_config_issued = false;
 			dwc->gadget.speed = USB_SPEED_UNKNOWN;
 			dwc->setup_packet_pending = false;
 #endif
@@ -2210,9 +2214,11 @@ static int dwc3_cleanup_done_reqs(struct dwc3 *dwc, struct dwc3_ep *dep,
 		dep->flags &= ~DWC3_EP_MISSED_ISOC;
 		return 1;
 	}
-	if (usb_endpoint_xfer_isoc(dep->endpoint.desc) && (event->status & DEPEVT_STATUS_IOC) &&
-			(trb->ctrl & DWC3_TRB_CTRL_IOC))
-		return 0;
+
+	if (usb_endpoint_xfer_isoc(dep->endpoint.desc))
+		if ((event->status & DEPEVT_STATUS_IOC) &&
+				(trb->ctrl & DWC3_TRB_CTRL_IOC))
+			return 0;
 	return 1;
 }
 
@@ -2233,7 +2239,7 @@ static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 
 	clean_busy = dwc3_cleanup_done_reqs(dwc, dep, event, status);
 	if (clean_busy && (is_xfer_complete ||
-				usb_endpoint_xfer_isoc(dep->endpoint.desc)))
+			usb_endpoint_xfer_isoc(dep->endpoint.desc)))
 		dep->flags &= ~DWC3_EP_BUSY;
 
 	/*
@@ -2655,8 +2661,6 @@ static void dwc3_gadget_conndone_interrupt(struct dwc3 *dwc)
 		dwc->gadget.speed = USB_SPEED_LOW;
 		break;
 	}
-
-	dwc->eps[1]->endpoint.maxpacket = dwc->gadget.ep0->maxpacket;
 
 	/* Enable USB2 LPM Capability */
 
@@ -3273,6 +3277,8 @@ void dwc3_gadget_disconnect_proc(struct dwc3 *dwc)
 
 	if (dwc->gadget_driver && dwc->gadget_driver->disconnect)
 		dwc->gadget_driver->disconnect(&dwc->gadget);
+
+	dwc->start_config_issued = false;
 
 	dwc->gadget.speed = USB_SPEED_UNKNOWN;
 	dwc->setup_packet_pending = false;

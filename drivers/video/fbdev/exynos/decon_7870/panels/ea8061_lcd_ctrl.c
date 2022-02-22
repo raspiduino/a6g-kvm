@@ -1,14 +1,10 @@
 /*
- * drivers/video/decon_7580/panels/ea8061_lcd_ctrl.c
- *
- * Samsung SoC MIPI LCD CONTROL functions
- *
- * Copyright (c) 2015 Samsung Electronics
+ * Copyright (c) Samsung Electronics Co., Ltd.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
-*/
+ */
 
 #include <linux/lcd.h>
 #include <linux/backlight.h>
@@ -50,7 +46,6 @@ struct lcd_info {
 	unsigned int acl_enable;
 	unsigned int current_acl;
 	unsigned int current_hbm;
-	unsigned char dump_info[3];
 
 	void *dim_data;
 	void *dim_info;
@@ -881,7 +876,7 @@ static ssize_t window_type_show(struct device *dev,
 {
 	struct lcd_info *lcd = dev_get_drvdata(dev);
 
-	sprintf(buf, "%x %x %x\n", lcd->id_info.id[0], lcd->id_info.id[1], lcd->id_info.id[2]);
+	sprintf(buf, "%02x %02x %02x\n", lcd->id_info.id[0], lcd->id_info.id[1], lcd->id_info.id[2]);
 
 	return strlen(buf);
 }
@@ -1024,88 +1019,6 @@ static ssize_t manufacture_code_show(struct device *dev,
 	return strlen(buf);
 }
 
-static ssize_t dump_register_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	struct lcd_info *lcd = dev_get_drvdata(dev);
-	char *pos = buf;
-	u8 reg, len, offset;
-	int ret, i;
-	u8 *dump = NULL;
-	unsigned char read_reg[] = {
-		EA8061_READ_TX_REG,
-		0x00,
-	};
-
-	reg = lcd->dump_info[0];
-	len = lcd->dump_info[1];
-	offset = lcd->dump_info[2];
-
-	read_reg[1] = reg;
-
-	if (!reg || !len || reg > 0xff || len > 255 || offset > 255)
-		goto exit;
-
-	dump = kcalloc(len, sizeof(u8), GFP_KERNEL);
-
-	if (lcd->state == PANEL_STATE_RESUMED) {
-		if (dsim_write_hl_data(lcd, SEQ_TEST_KEY_ON_F0, ARRAY_SIZE(SEQ_TEST_KEY_ON_F0)) < 0)
-			dev_err(&lcd->ld->dev, "failed to write test on f0 command.\n");
-
-		dsim_write_hl_data(lcd, read_reg, ARRAY_SIZE(read_reg));
-		ret = dsim_read_hl_data(lcd, EA8061_READ_RX_REG, len, dump);
-		if (ret < 0) {
-			dev_err(&lcd->ld->dev, "%s: failed to read, %x, %d, %d\n", __func__, reg, len, offset);
-			goto exit;
-		}
-
-		if (dsim_write_hl_data(lcd, SEQ_TEST_KEY_OFF_F0, ARRAY_SIZE(SEQ_TEST_KEY_OFF_F0)) < 0)
-			dev_err(&lcd->ld->dev, "failed to write test off f0 command.\n");
-	}
-
-	pos += sprintf(pos, "+ [%02X]\n", reg);
-	for (i = 0; i < len; i++)
-		pos += sprintf(pos, "%2d: %02x\n", i + offset + 1, dump[i]);
-	pos += sprintf(pos, "- [%02X]\n", reg);
-
-	dev_info(&lcd->ld->dev, "+ [%02X]\n", reg);
-	for (i = 0; i < len; i++)
-		dev_info(&lcd->ld->dev, "%2d: %02x\n", i + offset + 1, dump[i]);
-	dev_info(&lcd->ld->dev, "- [%02X]\n", reg);
-
-	kfree(dump);
-exit:
-	return pos - buf;
-}
-
-static ssize_t dump_register_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t size)
-{
-	struct lcd_info *lcd = dev_get_drvdata(dev);
-	unsigned int reg, len, offset;
-	int ret;
-
-	ret = sscanf(buf, "%8x %8d %8d", &reg, &len, &offset);
-
-	if (ret == 2)
-		offset = 0;
-
-	dev_info(dev, "%s: %x %d %d\n", __func__, reg, len, offset);
-
-	if (ret < 0)
-		return ret;
-	else {
-		if (!reg || !len || reg > 0xff || len > 255 || offset > 255)
-			return -EINVAL;
-
-		lcd->dump_info[0] = reg;
-		lcd->dump_info[1] = len;
-		lcd->dump_info[2] = offset;
-	}
-
-	return size;
-}
-
 static DEVICE_ATTR(lcd_type, 0444, lcd_type_show, NULL);
 static DEVICE_ATTR(window_type, 0444, window_type_show, NULL);
 static DEVICE_ATTR(manufacture_code, 0444, manufacture_code_show, NULL);
@@ -1114,7 +1027,6 @@ static DEVICE_ATTR(temperature, 0664, temperature_show, temperature_store);
 static DEVICE_ATTR(color_coordinate, 0444, color_coordinate_show, NULL);
 static DEVICE_ATTR(manufacture_date, 0444, manufacture_date_show, NULL);
 static DEVICE_ATTR(aid_log, 0444, aid_log_show, NULL);
-static DEVICE_ATTR(dump_register, 0644, dump_register_show, dump_register_store);
 
 static struct attribute *lcd_sysfs_attributes[] = {
 	&dev_attr_lcd_type.attr,
@@ -1125,7 +1037,6 @@ static struct attribute *lcd_sysfs_attributes[] = {
 	&dev_attr_color_coordinate.attr,
 	&dev_attr_manufacture_date.attr,
 	&dev_attr_aid_log.attr,
-	&dev_attr_dump_register.attr,
 	NULL,
 };
 

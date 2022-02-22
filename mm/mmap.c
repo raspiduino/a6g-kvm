@@ -469,12 +469,16 @@ static void validate_mm(struct mm_struct *mm)
 	struct vm_area_struct *vma = mm->mmap;
 
 	while (vma) {
+		struct anon_vma *anon_vma = vma->anon_vma;
 		struct anon_vma_chain *avc;
 
-		vma_lock_anon_vma(vma);
-		list_for_each_entry(avc, &vma->anon_vma_chain, same_vma)
-			anon_vma_interval_tree_verify(avc);
-		vma_unlock_anon_vma(vma);
+		if (anon_vma) {
+			anon_vma_lock_read(anon_vma);
+			list_for_each_entry(avc, &vma->anon_vma_chain, same_vma)
+				anon_vma_interval_tree_verify(avc);
+			anon_vma_unlock_read(anon_vma);
+		}
+
 		highest_address = vm_end_gap(vma);
 		vma = vma->vm_next;
 		i++;
@@ -1285,35 +1289,6 @@ static inline int mlock_future_check(struct mm_struct *mm,
 	return 0;
 }
 
-static inline u64 file_mmap_size_max(struct file *file, struct inode *inode)
-{
-	if (S_ISREG(inode->i_mode))
-		return MAX_LFS_FILESIZE;
-
-	if (S_ISBLK(inode->i_mode))
-		return MAX_LFS_FILESIZE;
-
-	/* Special "we do even unsigned file positions" case */
-	if (file->f_mode & FMODE_UNSIGNED_OFFSET)
-		return 0;
-
-	/* Yes, random drivers might want more. But I'm tired of buggy drivers */
-	return ULONG_MAX;
-}
-
-static inline bool file_mmap_ok(struct file *file, struct inode *inode,
-				unsigned long pgoff, unsigned long len)
-{
-	u64 maxsize = file_mmap_size_max(file, inode);
-
-	if (maxsize && len > maxsize)
-		return false;
-	maxsize -= len;
-	if (pgoff > maxsize >> PAGE_SHIFT)
-		return false;
-	return true;
-}
-
 /*
  * The caller must hold down_write(&current->mm->mmap_sem).
  */
@@ -1383,9 +1358,6 @@ unsigned long do_mmap_pgoff(struct file *file, unsigned long addr,
 
 	if (file) {
 		struct inode *inode = file_inode(file);
-
-		if (!file_mmap_ok(file, inode, pgoff, len))
-			return -EOVERFLOW;
 
 		switch (flags & MAP_TYPE) {
 		case MAP_SHARED:
@@ -2241,8 +2213,7 @@ int expand_upwards(struct vm_area_struct *vma, unsigned long address)
 		gap_addr = TASK_SIZE;
 
 	next = vma->vm_next;
-	if (next && next->vm_start < gap_addr &&
-			(next->vm_flags & (VM_WRITE|VM_READ|VM_EXEC))) {
+	if (next && next->vm_start < gap_addr) {
 		if (!(next->vm_flags & VM_GROWSUP))
 			return -ENOMEM;
 		/* Check that both stack segments have the same anon_vma? */
@@ -2257,7 +2228,7 @@ int expand_upwards(struct vm_area_struct *vma, unsigned long address)
 	 * is required to hold the mmap_sem in read mode.  We need the
 	 * anon_vma lock to serialize against concurrent expand_stacks.
 	 */
-	vma_lock_anon_vma(vma);
+	anon_vma_lock_write(vma->anon_vma);
 
 	/* Somebody else might have raced and expanded it already */
 	if (address > vma->vm_end) {
@@ -2275,7 +2246,7 @@ int expand_upwards(struct vm_area_struct *vma, unsigned long address)
 				 * updates, but we only hold a shared mmap_sem
 				 * lock here, so we need to protect against
 				 * concurrent vma expansions.
-				 * vma_lock_anon_vma() doesn't help here, as
+				 * anon_vma_lock_write() doesn't help here, as
 				 * we don't guarantee that all growable vmas
 				 * in a mm share the same root anon vma.
 				 * So, we reuse mm->page_table_lock to guard
@@ -2295,7 +2266,7 @@ int expand_upwards(struct vm_area_struct *vma, unsigned long address)
 			}
 		}
 	}
-	vma_unlock_anon_vma(vma);
+	anon_vma_unlock_write(vma->anon_vma);
 	khugepaged_enter_vma_merge(vma, vma->vm_flags);
 	validate_mm(vma->vm_mm);
 	return error;
@@ -2309,7 +2280,7 @@ int expand_downwards(struct vm_area_struct *vma,
 				   unsigned long address)
 {
 	struct vm_area_struct *prev;
-	unsigned long gap_addr;	
+	unsigned long gap_addr;
 	int error;
 
 	address &= PAGE_MASK;
@@ -2322,8 +2293,7 @@ int expand_downwards(struct vm_area_struct *vma,
 	if (gap_addr > address)
 		return -ENOMEM;
 	prev = vma->vm_prev;
-	if (prev && prev->vm_end > gap_addr &&
-			(prev->vm_flags & (VM_WRITE|VM_READ|VM_EXEC))) {
+	if (prev && prev->vm_end > gap_addr) {
 		if (!(prev->vm_flags & VM_GROWSDOWN))
 			return -ENOMEM;
 		/* Check that both stack segments have the same anon_vma? */
@@ -2338,7 +2308,7 @@ int expand_downwards(struct vm_area_struct *vma,
 	 * is required to hold the mmap_sem in read mode.  We need the
 	 * anon_vma lock to serialize against concurrent expand_stacks.
 	 */
-	vma_lock_anon_vma(vma);
+	anon_vma_lock_write(vma->anon_vma);
 
 	/* Somebody else might have raced and expanded it already */
 	if (address < vma->vm_start) {
@@ -2356,7 +2326,7 @@ int expand_downwards(struct vm_area_struct *vma,
 				 * updates, but we only hold a shared mmap_sem
 				 * lock here, so we need to protect against
 				 * concurrent vma expansions.
-				 * vma_lock_anon_vma() doesn't help here, as
+				 * anon_vma_lock_write() doesn't help here, as
 				 * we don't guarantee that all growable vmas
 				 * in a mm share the same root anon vma.
 				 * So, we reuse mm->page_table_lock to guard
@@ -2374,7 +2344,7 @@ int expand_downwards(struct vm_area_struct *vma,
 			}
 		}
 	}
-	vma_unlock_anon_vma(vma);
+	anon_vma_unlock_write(vma->anon_vma);
 	khugepaged_enter_vma_merge(vma, vma->vm_flags);
 	validate_mm(vma->vm_mm);
 	return error;
@@ -2690,6 +2660,7 @@ int do_munmap(struct mm_struct *mm, unsigned long start, size_t len)
 
 	return 0;
 }
+EXPORT_SYMBOL(do_munmap);
 
 int vm_munmap(unsigned long start, size_t len)
 {

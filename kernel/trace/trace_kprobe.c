@@ -361,10 +361,11 @@ static struct trace_kprobe *find_trace_kprobe(const char *event,
 static int
 enable_trace_kprobe(struct trace_kprobe *tk, struct ftrace_event_file *file)
 {
-	struct event_file_link *link = NULL;
 	int ret = 0;
 
 	if (file) {
+		struct event_file_link *link;
+
 		link = kmalloc(sizeof(*link), GFP_KERNEL);
 		if (!link) {
 			ret = -ENOMEM;
@@ -383,18 +384,6 @@ enable_trace_kprobe(struct trace_kprobe *tk, struct ftrace_event_file *file)
 			ret = enable_kretprobe(&tk->rp);
 		else
 			ret = enable_kprobe(&tk->rp.kp);
-	}
-
-	if (ret) {
-		if (file) {
-			/* Notice the if is true on not WARN() */
-			if (!WARN_ON_ONCE(!link))
-				list_del_rcu(&link->list);
-			kfree(link);
-			tk->tp.flags &= ~TP_FLAG_TRACE;
-		} else {
-			tk->tp.flags &= ~TP_FLAG_PROFILE;
-		}
 	}
  out:
 	return ret;
@@ -622,7 +611,7 @@ static int create_trace_kprobe(int argc, char **argv)
 	bool is_return = false, is_delete = false;
 	char *symbol = NULL, *event = NULL, *group = NULL;
 	char *arg;
-	long offset = 0;
+	unsigned long offset = 0;
 	void *addr = NULL;
 	char buf[MAX_EVENT_NAME_LEN];
 
@@ -690,7 +679,7 @@ static int create_trace_kprobe(int argc, char **argv)
 		symbol = argv[1];
 		/* TODO: support .init module functions */
 		ret = traceprobe_split_symbol_offset(symbol, &offset);
-		if (ret || offset < 0 || offset > UINT_MAX) {
+		if (ret) {
 			pr_info("Failed to parse either an address or a symbol.\n");
 			return ret;
 		}
@@ -1326,7 +1315,7 @@ static int unregister_kprobe_event(struct trace_kprobe *tk)
 	return ret;
 }
 
-/* Make a debugfs interface for controlling probe points */
+/* Make a tracefs interface for controlling probe points */
 static __init int init_kprobe_trace(void)
 {
 	struct dentry *d_tracer;
@@ -1336,23 +1325,23 @@ static __init int init_kprobe_trace(void)
 		return -EINVAL;
 
 	d_tracer = tracing_init_dentry();
-	if (!d_tracer)
+	if (IS_ERR(d_tracer))
 		return 0;
 
-	entry = debugfs_create_file("kprobe_events", 0644, d_tracer,
+	entry = tracefs_create_file("kprobe_events", 0644, d_tracer,
 				    NULL, &kprobe_events_ops);
 
 	/* Event list interface */
 	if (!entry)
-		pr_warning("Could not create debugfs "
+		pr_warning("Could not create tracefs "
 			   "'kprobe_events' entry\n");
 
 	/* Profile interface */
-	entry = debugfs_create_file("kprobe_profile", 0444, d_tracer,
+	entry = tracefs_create_file("kprobe_profile", 0444, d_tracer,
 				    NULL, &kprobe_profile_ops);
 
 	if (!entry)
-		pr_warning("Could not create debugfs "
+		pr_warning("Could not create tracefs "
 			   "'kprobe_profile' entry\n");
 	return 0;
 }

@@ -54,6 +54,16 @@ struct lcd_seq_info {
 	unsigned int	sleep;
 };
 
+static unsigned char SEQ_POWER_SEQ[] = {
+	0xB1,
+	0x3C, 0x89, 0x00, 0x05, 0x33, 0x31, 0x14,
+};
+
+static unsigned char SEQ_AOR_MAX[] = {
+	0xB2,
+	0x00, 0x00, 0x05, 0x10,
+};
+
 static unsigned char SEQ_SLEEP_OUT[] = {
 	0x11
 };
@@ -370,12 +380,10 @@ static unsigned char AOR_TABLE[IBRIGHTNESS_MAX][AID_CMD_CNT] = {
 /* platform brightness <-> acl opr and percent */
 static unsigned int brightness_opr_table[ACL_STATUS_MAX][EXTEND_BRIGHTNESS + 1] = {
 	{
-		[0 ... UI_MAX_BRIGHTNESS - 1]				= OPR_STATUS_15P,
-		[UI_MAX_BRIGHTNESS ... EXTEND_BRIGHTNESS - 1]		= OPR_STATUS_OFF,
-		[EXTEND_BRIGHTNESS ... EXTEND_BRIGHTNESS]		= OPR_STATUS_08P
+		[0 ... EXTEND_BRIGHTNESS]			= OPR_STATUS_OFF,
 	}, {
-		[0 ... EXTEND_BRIGHTNESS - 1]				= OPR_STATUS_15P,
-		[EXTEND_BRIGHTNESS ... EXTEND_BRIGHTNESS]		= OPR_STATUS_08P
+		[0 ... EXTEND_BRIGHTNESS - 1]			= OPR_STATUS_15P,
+		[EXTEND_BRIGHTNESS ... EXTEND_BRIGHTNESS]	= OPR_STATUS_08P
 	}
 };
 

@@ -1,13 +1,10 @@
-/* linux/drivers/video/backlight/s6d7aa0_degas2_mipi_lcd.c
- *
- * Samsung SoC MIPI LCD CONTROL functions
- *
- * Copyright (c) 2015 Samsung Electronics
+/*
+ * Copyright (c) Samsung Electronics Co., Ltd.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
-*/
+ */
 
 #include <linux/lcd.h>
 #include <linux/backlight.h>
@@ -22,7 +19,7 @@
 #include "dsim_panel.h"
 
 #include "s6d7aa0_bv055hdm_param.h"
-#include "backlight_tuning.h"
+#include "dd.h"
 
 #define S6D7AA0_ID_REG			0xDA
 #define S6D7AA0_ID_LEN			3
@@ -56,7 +53,6 @@ struct lcd_info {
 		};
 		u32			value;
 	} id_info;
-	unsigned char			dump_info[3];
 
 	struct dsim_device		*dsim;
 	struct mutex			lock;
@@ -91,6 +87,7 @@ try_write:
 	return ret;
 }
 
+#if defined(CONFIG_SEC_FACTORY)
 static int dsim_read_hl_data(struct lcd_info *lcd, u8 addr, u32 size, u8 *buf)
 {
 	int ret = 0, rx_size = 0;
@@ -113,23 +110,7 @@ try_read:
 
 	return ret;
 }
-
-static int dsim_read_hl_data_offset(struct lcd_info *lcd, u8 addr, u32 size, u8 *buf, u32 offset)
-{
-	unsigned char wbuf[] = {0xB0, 0};
-	int ret = 0;
-
-	wbuf[1] = offset;
-
-	if (offset)
-		DSI_WRITE(wbuf, ARRAY_SIZE(wbuf));
-
-	ret = dsim_read_hl_data(lcd, addr, size, buf);
-	if (ret < 0)
-		dev_err(&lcd->ld->dev, "%s: fail\n", __func__);
-
-	return ret;
-}
+#endif
 
 static int lm3632_array_write(struct lcd_info *lcd, const struct i2c_rom_data *eprom_ptr, int eprom_size)
 {
@@ -198,10 +179,10 @@ static int dsim_panel_set_brightness(struct lcd_info *lcd, int force)
 			dev_info(&lcd->ld->dev, "%s: Back light IC outdoor mode : %d\n", __func__, lcd->current_hbm);
 		}
 
-		if (lcd->bl >= 3)
+		if (lcd->bl >= 3) {
 			if (lcd->bl <= DIM_BRIGHTNESS) {
 				bl_reg[1] = lcd->bl;
-			} else if (lcd->bl <= UI_DEFAULT_BRIGHTNESS) { //92lv == 191cd
+			} else if (lcd->bl <= UI_DEFAULT_BRIGHTNESS) { /* 92lv == 191cd */
 				temp = (lcd->bl - DIM_BRIGHTNESS) * (DEFAULT_CANDELA - DIM_BRIGHTNESS);
 				temp /= (UI_DEFAULT_BRIGHTNESS - DIM_BRIGHTNESS);
 				temp += DIM_BRIGHTNESS;
@@ -210,13 +191,12 @@ static int dsim_panel_set_brightness(struct lcd_info *lcd, int force)
 				temp = (lcd->bl - UI_DEFAULT_BRIGHTNESS) * (0xCD - DEFAULT_CANDELA);
 				temp /= (0xFF - UI_DEFAULT_BRIGHTNESS);
 				temp += DEFAULT_CANDELA;
-				if(temp > 0xCD)
+				if (temp > 0xCD)
 					bl_reg[1] = 0xCD;
 				else
 					bl_reg[1] = temp;
 			}
-
-		else if(lcd->bl >= 1)
+		} else if (lcd->bl >= 1)
 			bl_reg[1] = 0x02;
 		else
 			bl_reg[1] = 0x00;
@@ -667,95 +647,17 @@ static ssize_t window_type_show(struct device *dev,
 {
 	struct lcd_info *lcd = dev_get_drvdata(dev);
 
-	sprintf(buf, "%x %x %x\n", lcd->id_info.id[0], lcd->id_info.id[1], lcd->id_info.id[2]);
+	sprintf(buf, "%02x %02x %02x\n", lcd->id_info.id[0], lcd->id_info.id[1], lcd->id_info.id[2]);
 
 	return strlen(buf);
 }
 
-static ssize_t dump_register_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	struct lcd_info *lcd = dev_get_drvdata(dev);
-	char *pos = buf;
-	u8 reg, len, offset;
-	int ret, i;
-	u8 *dump = NULL;
-
-	reg = lcd->dump_info[0];
-	len = lcd->dump_info[1];
-	offset = lcd->dump_info[2];
-
-	if (!reg || !len || reg > 0xff || len > 255 || offset > 255)
-		goto exit;
-
-	dump = kcalloc(len, sizeof(u8), GFP_KERNEL);
-
-	if (lcd->state == PANEL_STATE_RESUMED) {
-		DSI_WRITE(SEQ_PASSWD1, ARRAY_SIZE(SEQ_PASSWD1));
-		DSI_WRITE(SEQ_PASSWD3, ARRAY_SIZE(SEQ_PASSWD3));
-
-		ret = dsim_read_hl_data_offset(lcd, reg, len, dump, offset);
-		if (ret < 0) {
-			dev_err(&lcd->ld->dev, "%s: failed to read, %x, %d, %d\n", __func__, reg, len, offset);
-			goto exit;
-		}
-
-		DSI_WRITE(SEQ_PASSWD3_LOCK, ARRAY_SIZE(SEQ_PASSWD3_LOCK));
-		DSI_WRITE(SEQ_PASSWD1_LOCK, ARRAY_SIZE(SEQ_PASSWD1_LOCK));
-	}
-
-	pos += sprintf(pos, "+ [%02X]\n", reg);
-	for (i = 0; i < len; i++)
-		pos += sprintf(pos, "%2d: %02x\n", i + offset + 1, dump[i]);
-	pos += sprintf(pos, "- [%02X]\n", reg);
-
-	dev_info(&lcd->ld->dev, "+ [%02X]\n", reg);
-	for (i = 0; i < len; i++)
-		dev_info(&lcd->ld->dev, "%2d: %02x\n", i + offset + 1, dump[i]);
-	dev_info(&lcd->ld->dev, "- [%02X]\n", reg);
-
-	kfree(dump);
-exit:
-	return pos - buf;
-}
-
-static ssize_t dump_register_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t size)
-{
-	struct lcd_info *lcd = dev_get_drvdata(dev);
-	unsigned int reg, len, offset;
-	int ret;
-
-	ret = sscanf(buf, "%8x %8d %8d", &reg, &len, &offset);
-
-	if (ret == 2)
-		offset = 0;
-
-	dev_info(dev, "%s: %x %d %d\n", __func__, reg, len, offset);
-
-	if (ret < 0)
-		return ret;
-	else {
-		if (!reg || !len || reg > 0xff || len > 255 || offset > 255)
-			return -EINVAL;
-
-		lcd->dump_info[0] = reg;
-		lcd->dump_info[1] = len;
-		lcd->dump_info[2] = offset;
-	}
-
-	return size;
-}
-
-
 static DEVICE_ATTR(lcd_type, 0444, lcd_type_show, NULL);
 static DEVICE_ATTR(window_type, 0444, window_type_show, NULL);
-static DEVICE_ATTR(dump_register, 0644, dump_register_show, dump_register_store);
 
 static struct attribute *lcd_sysfs_attributes[] = {
 	&dev_attr_lcd_type.attr,
 	&dev_attr_window_type.attr,
-	&dev_attr_dump_register.attr,
 	NULL,
 };
 
@@ -772,7 +674,7 @@ static void lcd_init_sysfs(struct lcd_info *lcd)
 	if (ret < 0)
 		dev_err(&lcd->ld->dev, "failed to add lcd sysfs\n");
 
-	init_bl_curve_debugfs(lcd->bd, NULL, clients);
+	init_debugfs_backlight(lcd->bd, NULL, clients);
 }
 
 static int dsim_panel_probe(struct dsim_device *dsim)

@@ -95,14 +95,13 @@ int crypto_hash_walk_done(struct crypto_hash_walk *walk, int err)
 
 	if (nbytes && walk->offset & alignmask && !err) {
 		walk->offset = ALIGN(walk->offset, alignmask + 1);
+		walk->data += walk->offset;
+
 		nbytes = min(nbytes,
 			     ((unsigned int)(PAGE_SIZE)) - walk->offset);
 		walk->entrylen -= nbytes;
 
-		if (nbytes) {
-			walk->data += walk->offset;
-			return nbytes;
-		}
+		return nbytes;
 	}
 
 	if (walk->flags & CRYPTO_ALG_ASYNC)
@@ -449,6 +448,8 @@ static void ahash_def_finup_done1(struct crypto_async_request *req, int err)
 	if (err == -EINPROGRESS) {
 		ahash_notify_einprogress(areq);
 		return;
+			ahash_notify_einprogress(areq);
+			return;
 	}
 
 	areq->base.flags &= ~CRYPTO_TFM_REQ_MAY_SLEEP;
@@ -456,6 +457,7 @@ static void ahash_def_finup_done1(struct crypto_async_request *req, int err)
 	err = ahash_def_finup_finish1(areq, err);
 	if (areq->priv)
 		return;
+			return;
 
 	areq->base.complete(&areq->base, err);
 }
@@ -667,17 +669,6 @@ struct hash_alg_common *ahash_attr_alg(struct rtattr *rta, u32 type, u32 mask)
 	return IS_ERR(alg) ? ERR_CAST(alg) : __crypto_hash_alg_common(alg);
 }
 EXPORT_SYMBOL_GPL(ahash_attr_alg);
-
-bool crypto_hash_alg_has_setkey(struct hash_alg_common *halg)
-{
-	struct crypto_alg *alg = &halg->base;
-
-	if (alg->cra_type != &crypto_ahash_type)
-		return crypto_shash_alg_has_setkey(__crypto_shash_alg(alg));
-
-	return __crypto_ahash_alg(alg)->setkey != NULL;
-}
-EXPORT_SYMBOL_GPL(crypto_hash_alg_has_setkey);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Asynchronous cryptographic hash type");

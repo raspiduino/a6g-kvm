@@ -972,12 +972,7 @@ static void __init log_buf_len_update(unsigned size)
 /* save requested log_buf_len since it's too early to process it */
 static int __init log_buf_len_setup(char *str)
 {
-	unsigned int size;
-
-	if (!str)
-		return -EINVAL;
-
-	size = memparse(str, &str);
+	unsigned size = memparse(str, &str);
 
 	log_buf_len_update(size);
 
@@ -1033,6 +1028,7 @@ void __init setup_log_buf(int early)
 	if (!new_log_buf_len)
 		return;
 
+	set_memsize_kernel_type(MEMSIZE_KERNEL_LOGBUF);
 	if (early) {
 		new_log_buf =
 			memblock_virt_alloc(new_log_buf_len, LOG_ALIGN);
@@ -1040,6 +1036,7 @@ void __init setup_log_buf(int early)
 		new_log_buf = memblock_virt_alloc_nopanic(new_log_buf_len,
 							  LOG_ALIGN);
 	}
+	set_memsize_kernel_type(MEMSIZE_KERNEL_OTHERS);
 
 	if (unlikely(!new_log_buf)) {
 		pr_err("log_buf_len: %ld bytes not available\n",

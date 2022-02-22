@@ -18,6 +18,9 @@
 #include <linux/ccic/pdic_notifier.h>
 #include <linux/ccic/usbpd_msg.h>
 #endif
+#if defined(CONFIG_TYPEC)
+#include <linux/usb/typec.h>
+#endif
 
 #ifndef __USBPD_S2MU004_H__
 #define __USBPD_S2MU004_H__
@@ -36,12 +39,15 @@
 #define S2MU004_HARD_RESET_DELAY_MS		(300)
 #define S2MU004_WAIT_RD_DETACH_DELAY_MS		(200)
 #define S2MU004_WAIT_ATTACH_DELAY_MS		(30)
-#if defined(CONFIG_DUAL_ROLE_USB_INTF)
 #define DUAL_ROLE_SET_MODE_WAIT_MS		(2000)
-#endif
-#define S2MU004_WATER_CHK_INTERVAL_TIME		(200)
 
-#define WATER_CHK_RETRY_CNT	5
+#define S2MU004_WATER_CHK_INTERVAL_TIME		(300)
+
+#define WATER_CHK_RETRY_CNT	2
+#define IS_CC_RP(cc1, cc2)	((cc1 == USBPD_Rp) && (cc2 == USBPD_Rp))
+#define IS_CC_WATER(cc1, cc2)	((cc1 != USBPD_Rp) && (cc2 != USBPD_Rp))
+#define IS_ONLY_CC1_WATER(cc1, cc2)	((cc1 != USBPD_Rp) && (cc2 == USBPD_Rp))
+#define IS_ONLY_CC2_WATER(cc1, cc2)	((cc1 == USBPD_Rp) && (cc2 != USBPD_Rp))
 
 /*****************************************/
 /***********DEFINITION REGISTER***********/
@@ -106,12 +112,15 @@
 #define S2MU004_REG_PLUG_CTRL_CC_HOLD_BIT     (0x1)
 
 /* reg 0x27 */
+#define S2MU004_REG_PLUG_CTRL_FSM_MANUAL_EN_SHIFT	(2)
 #define S2MU004_REG_PLUG_CTRL_RpRd_PLUG_SEL_SHIFT	(3)
 #define S2MU004_REG_PLUG_CTRL_VCONN_MANUAL_EN_SHIFT	(4)
 #define S2MU004_REG_PLUG_CTRL_RpRd_CC1_VCONN_SHIFT	(5)
 #define S2MU004_REG_PLUG_CTRL_RpRd_CC2_VCONN_SHIFT	(6)
 #define S2MU004_REG_PLUG_CTRL_RpRd_MANUAL_EN_SHIFT	(7)
 
+#define S2MU004_REG_PLUG_CTRL_FSM_MANUAL_EN \
+		(0x1 << S2MU004_REG_PLUG_CTRL_FSM_MANUAL_EN_SHIFT) /* 0x04 */
 #define S2MU004_REG_PLUG_CTRL_RpRd_MANUAL_MASK \
 		(0x1 << S2MU004_REG_PLUG_CTRL_RpRd_PLUG_SEL_SHIFT | \
 			0x1 << S2MU004_REG_PLUG_CTRL_RpRd_MANUAL_EN_SHIFT) /* 0x88 */
@@ -138,6 +147,11 @@
 #define S2MU004_REG_PLUG_CTRL_CC1_MANUAL_EN_SHIFT	(5)
 #define S2MU004_REG_PLUG_CTRL_CC2_MANUAL_EN_SHIFT	(6)
 
+#define S2MU004_REG_PLUG_CTRL_FSM_MANUAL_INPUT_MASK	(0xf)
+#define S2MU004_REG_PLUG_CTRL_FSM_ATTACHED_SNK		(2)
+#define S2MU004_REG_PLUG_CTRL_FSM_ATTACHED_SRC		(6)
+#define S2MU004_REG_PLUG_CTRL_CC_MANUAL_EN \
+		(0x1 << S2MU004_REG_PLUG_CTRL_CC_MANUAL_EN_SHIFT) /* 0x10 */
 #define S2MU004_REG_PLUG_CTRL_CC1_MANUAL_ON \
 		(0x1 << S2MU004_REG_PLUG_CTRL_CC_MANUAL_EN_SHIFT | \
 		0x1 << S2MU004_REG_PLUG_CTRL_CC1_MANUAL_EN_SHIFT) /* 0x30 */
@@ -269,6 +283,7 @@
 #define ENABLED_INT_4	(S2MU004_REG_INT_STATUS4_USB_DETACH |\
 				S2MU004_REG_INT_STATUS4_PLUG_IRQ |\
 				S2MU004_REG_INT_STATUS4_MSG_PASS)
+#define ENABLED_INT_5   (S2MU004_REG_INT_STATUS5_HARD_RESET)
 
 /* S2MU004 I2C registers */
 enum s2mu004_usbpd_reg {
@@ -476,6 +491,7 @@ struct s2mu004_usbpd_data {
 	struct mutex _mutex;
 	struct mutex poll_mutex;
 	struct mutex lpm_mutex;
+	struct mutex cc_mutex;
 	int vconn_en;
 	int regulator_en;
 	int irq_gpio;
@@ -498,15 +514,26 @@ struct s2mu004_usbpd_data {
 	int rid;
 	int is_host;
 	int is_client;
-	int data_role_dual; /* data_role for dual role swap */
-	int power_role_dual; /* power_role for dual role swap */
 	int is_attached;
+	u8 rp_currentlvl; 
 #if defined(CONFIG_DUAL_ROLE_USB_INTF)
 	struct dual_role_phy_instance *dual_role;
 	struct dual_role_phy_desc *desc;
 	struct completion reverse_completion;
 	int try_state_change;
 	struct delayed_work role_swap_work;
+	int data_role_dual; /* data_role for dual role swap */
+	int power_role_dual; /* power_role for dual role swap */
+#elif defined(CONFIG_TYPEC)
+	struct typec_port *port;
+	struct typec_partner *partner;
+	struct usb_pd_identity partner_identity;
+	struct typec_capability typec_cap;
+	struct completion role_reverse_completion;
+	int typec_power_role;
+	int typec_data_role;
+	int typec_try_state_change;
+	struct delayed_work typec_role_swap_work;
 #endif
 	struct notifier_block type3_nb;
 	struct workqueue_struct *pdic_queue;
@@ -523,7 +550,7 @@ extern void s2mu004_usbpd_set_muic_type(int type);
 #if defined(CONFIG_CCIC_NOTIFIER)
 extern void s2mu004_control_option_command(struct s2mu004_usbpd_data *usbpd_data, int cmd);
 #endif
-#if defined(CONFIG_DUAL_ROLE_USB_INTF)
+#if (defined CONFIG_DUAL_ROLE_USB_INTF || defined CONFIG_TYPEC)
 extern void s2mu004_rprd_mode_change(struct s2mu004_usbpd_data *usbpd_data, u8 mode);
 #endif
 extern void vbus_turn_on_ctrl(struct s2mu004_usbpd_data *usbpd_data, bool enable);

@@ -1,14 +1,10 @@
 /*
- * drivers/video/decon_7870/panels/s6e3fa3_a7xe_lcd_ctrl.c
- *
- * Samsung SoC MIPI LCD CONTROL functions
- *
- * Copyright (c) 2015 Samsung Electronics
+ * Copyright (c) Samsung Electronics Co., Ltd.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
-*/
+ */
 
 #include <linux/lcd.h>
 #include <linux/backlight.h>
@@ -26,7 +22,7 @@
 
 #define POWER_IS_ON(pwr)			(pwr <= FB_BLANK_NORMAL)
 #define LEVEL_IS_HBM(brightness)		(brightness == EXTEND_BRIGHTNESS)
-#define LEVEL_IS_ACL_OFF(brightness)		(UI_MAX_BRIGHTNESS <= brightness && brightness <= 281)
+#define LEVEL_IS_ACL_OFF(brightness)		(brightness >= UI_MAX_BRIGHTNESS && brightness <= 281)
 
 #define DSI_WRITE(cmd, size)		do {				\
 	ret = dsim_write_hl_data(lcd, cmd, size);			\
@@ -40,7 +36,7 @@
 #define smtd_dbg(format, arg...)
 #endif
 
-#define get_bit(value, shift, size)	((value >> shift) & (0xffffffff >> (32 - size)))
+#define get_bit(value, shift, width)	((value >> shift) & (GENMASK(width - 1, 0)))
 
 union aor_info {
 	u32 value;
@@ -109,7 +105,6 @@ struct lcd_info {
 	unsigned char			date[LDI_LEN_DATE];
 	unsigned int			coordinate[2];
 
-	unsigned char			dump_info[3];
 	unsigned int			adaptive_control;
 	int						lux;
 	struct class			*mdnie_class;
@@ -165,23 +160,6 @@ try_read:
 			ret = -EPERM;
 		}
 	}
-
-	return ret;
-}
-
-static int dsim_read_hl_data_offset(struct lcd_info *lcd, u8 addr, u32 size, u8 *buf, u32 offset)
-{
-	unsigned char wbuf[] = {0xB0, 0};
-	int ret = 0;
-
-	wbuf[1] = offset;
-
-	if (offset)
-		DSI_WRITE(wbuf, ARRAY_SIZE(wbuf));
-
-	ret = dsim_read_hl_data(lcd, addr, size, buf);
-	if (ret < 0)
-		dev_err(&lcd->ld->dev, "%s: fail\n", __func__);
 
 	return ret;
 }
@@ -526,7 +504,7 @@ static int init_gamma(struct lcd_info *lcd, u8 *mtp_data)
 	int **gamma;
 
 	/* allocate memory for local gamma table */
-	gamma = kzalloc(IBRIGHTNESS_MAX * sizeof(int *), GFP_KERNEL);
+	gamma = kcalloc(IBRIGHTNESS_MAX, sizeof(int *), GFP_KERNEL);
 	if (!gamma) {
 		pr_err("failed to allocate gamma table\n");
 		ret = -ENOMEM;
@@ -534,7 +512,7 @@ static int init_gamma(struct lcd_info *lcd, u8 *mtp_data)
 	}
 
 	for (i = 0; i < IBRIGHTNESS_MAX; i++) {
-		gamma[i] = kzalloc(IV_MAX*CI_MAX * sizeof(int), GFP_KERNEL);
+		gamma[i] = kcalloc(IV_MAX*CI_MAX, sizeof(int), GFP_KERNEL);
 		if (!gamma[i]) {
 			pr_err("failed to allocate gamma\n");
 			ret = -ENOMEM;
@@ -834,11 +812,6 @@ static int init_hbm_gamma(struct lcd_info *lcd)
 	for (i = IBRIGHTNESS_MAX; i < IBRIGHTNESS_HBM_MAX; i++)
 		memcpy(&lcd->gamma_table[i], SEQ_GAMMA_CONDITION_SET, GAMMA_CMD_CNT);
 
-/*
-	V255 of 443 nit
-	ratio = (443-420) / (600-420) = 0.127778
-	target gamma = 256 + (281 - 256) * 0.127778 = 259.1944
-*/
 	for (i = IBRIGHTNESS_MAX; i < IBRIGHTNESS_HBM_MAX; i++) {
 		t1 = hitp->ibr_tbl[i] - hitp->ibr_tbl[hitp->idx_ref];
 		t2 = hitp->ibr_tbl[hitp->idx_hbm] - hitp->ibr_tbl[hitp->idx_ref];
@@ -1042,7 +1015,7 @@ static ssize_t window_type_show(struct device *dev,
 {
 	struct lcd_info *lcd = dev_get_drvdata(dev);
 
-	sprintf(buf, "%x %x %x\n", lcd->id_info.id[0], lcd->id_info.id[1], lcd->id_info.id[2]);
+	sprintf(buf, "%02x %02x %02x\n", lcd->id_info.id[0], lcd->id_info.id[1], lcd->id_info.id[2]);
 
 	return strlen(buf);
 }
@@ -1226,81 +1199,6 @@ static ssize_t aid_log_show(struct device *dev,
 	return strlen(buf);
 }
 
-static ssize_t dump_register_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	struct lcd_info *lcd = dev_get_drvdata(dev);
-	char *pos = buf;
-	u8 reg, len, offset;
-	int ret, i;
-	u8 *dump = NULL;
-
-	reg = lcd->dump_info[0];
-	len = lcd->dump_info[1];
-	offset = lcd->dump_info[2];
-
-	if (!reg || !len || reg > 0xff || len > 255 || offset > 255)
-		goto exit;
-
-	dump = kcalloc(len, sizeof(u8), GFP_KERNEL);
-
-	if (lcd->state == PANEL_STATE_RESUMED) {
-		DSI_WRITE(SEQ_TEST_KEY_ON_F0, ARRAY_SIZE(SEQ_TEST_KEY_ON_F0));
-		DSI_WRITE(SEQ_TEST_KEY_ON_FC, ARRAY_SIZE(SEQ_TEST_KEY_ON_FC));
-
-		ret = dsim_read_hl_data_offset(lcd, reg, len, dump, offset);
-		if (ret < 0) {
-			dev_err(&lcd->ld->dev, "%s: failed to read, %x, %d, %d\n", __func__, reg, len, offset);
-			goto exit;
-		}
-
-		DSI_WRITE(SEQ_TEST_KEY_OFF_F0, ARRAY_SIZE(SEQ_TEST_KEY_OFF_F0));
-		DSI_WRITE(SEQ_TEST_KEY_OFF_FC, ARRAY_SIZE(SEQ_TEST_KEY_OFF_FC));
-	}
-
-	pos += sprintf(pos, "+ [%02X]\n", reg);
-	for (i = 0; i < len; i++)
-		pos += sprintf(pos, "%2d: %02x\n", i + offset + 1, dump[i]);
-	pos += sprintf(pos, "- [%02X]\n", reg);
-
-	dev_info(&lcd->ld->dev, "+ [%02X]\n", reg);
-	for (i = 0; i < len; i++)
-		dev_info(&lcd->ld->dev, "%2d: %02x\n", i + offset + 1, dump[i]);
-	dev_info(&lcd->ld->dev, "- [%02X]\n", reg);
-
-	kfree(dump);
-exit:
-	return pos - buf;
-}
-
-static ssize_t dump_register_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t size)
-{
-	struct lcd_info *lcd = dev_get_drvdata(dev);
-	unsigned int reg, len, offset;
-	int ret;
-
-	ret = sscanf(buf, "%8x %8d %8d", &reg, &len, &offset);
-
-	if (ret == 2)
-		offset = 0;
-
-	dev_info(dev, "%s: %x %d %d\n", __func__, reg, len, offset);
-
-	if (ret < 0)
-		return ret;
-	else {
-		if (!reg || !len || reg > 0xff || len > 255 || offset > 255)
-			return -EINVAL;
-
-		lcd->dump_info[0] = reg;
-		lcd->dump_info[1] = len;
-		lcd->dump_info[2] = offset;
-	}
-
-	return size;
-}
-
 static ssize_t adaptive_control_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -1360,7 +1258,9 @@ static ssize_t lux_store(struct device *dev,
 		lcd->lux = value;
 		mutex_unlock(&lcd->lock);
 
+#if defined(CONFIG_EXYNOS_DECON_MDNIE_LITE)
 		attr_store_for_each(lcd->mdnie_class, attr->attr.name, buf, size);
+#endif
 	}
 
 	return size;
@@ -1375,7 +1275,6 @@ static DEVICE_ATTR(temperature, 0664, temperature_show, temperature_store);
 static DEVICE_ATTR(color_coordinate, 0444, color_coordinate_show, NULL);
 static DEVICE_ATTR(manufacture_date, 0444, manufacture_date_show, NULL);
 static DEVICE_ATTR(aid_log, 0444, aid_log_show, NULL);
-static DEVICE_ATTR(dump_register, 0644, dump_register_show, dump_register_store);
 static DEVICE_ATTR(adaptive_control, 0664, adaptive_control_show, adaptive_control_store);
 static DEVICE_ATTR(lux, 0644, lux_show, lux_store);
 
@@ -1388,7 +1287,6 @@ static struct attribute *lcd_sysfs_attributes[] = {
 	&dev_attr_color_coordinate.attr,
 	&dev_attr_manufacture_date.attr,
 	&dev_attr_aid_log.attr,
-	&dev_attr_dump_register.attr,
 	&dev_attr_brightness_table.attr,
 	&dev_attr_adaptive_control.attr,
 	&dev_attr_lux.attr,

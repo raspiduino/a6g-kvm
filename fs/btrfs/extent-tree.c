@@ -3946,7 +3946,6 @@ again:
 	if (wait_for_alloc) {
 		mutex_unlock(&fs_info->chunk_mutex);
 		wait_for_alloc = 0;
-		cond_resched();
 		goto again;
 	}
 
@@ -4281,7 +4280,7 @@ static int flush_space(struct btrfs_root *root,
 		break;
 	}
 
-	return 0;
+	return ret;
 }
 
 static inline u64
@@ -9487,7 +9486,7 @@ void btrfs_delete_unused_bgs(struct btrfs_fs_info *fs_info)
 		/* Don't want to race with allocators so take the groups_sem */
 		down_write(&space_info->groups_sem);
 		spin_lock(&block_group->lock);
-		if (block_group->reserved || block_group->pinned ||
+		if (block_group->reserved ||
 		    btrfs_block_group_used(&block_group->item) ||
 		    block_group->ro) {
 			/*

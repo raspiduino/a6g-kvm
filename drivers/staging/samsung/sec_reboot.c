@@ -51,6 +51,10 @@ enum sec_reset_reason {
 	SEC_RESET_REASON_FOTA_BL   = (SEC_RESET_REASON_PREFIX | 0x6), /* update bootloader */
 	SEC_RESET_REASON_SECURE    = (SEC_RESET_REASON_PREFIX | 0x7), /* image secure check fail */
 	SEC_RESET_REASON_FWUP      = (SEC_RESET_REASON_PREFIX | 0x9), /* emergency firmware update */
+	SEC_RESET_REASON_BOOTLOADER      = (SEC_RESET_REASON_PREFIX | 0xd),
+#ifdef CONFIG_MUIC_S2MU005
+	SEC_RESET_REASON_MUIC_1K   = (SEC_RESET_REASON_PREFIX | 0xe), /* setting for muic 1k */
+#endif
 	SEC_RESET_REASON_EMERGENCY = 0x0,
 	
 	#ifdef CONFIG_SEC_DEBUG_MDM_SEPERATE_CRASH
@@ -190,6 +194,8 @@ static void sec_reboot(enum reboot_mode reboot_mode, const char *cmd)
 			exynos_pmu_write(EXYNOS_PMU_INFORM3, SEC_RESET_REASON_RECOVERY);
 		else if (!strcmp(cmd, "download"))
 			exynos_pmu_write(EXYNOS_PMU_INFORM3, SEC_RESET_REASON_DOWNLOAD);
+		else if (!strcmp(cmd, "bootloader"))
+			exynos_pmu_write(EXYNOS_PMU_INFORM3, SEC_RESET_REASON_BOOTLOADER);
 		else if (!strcmp(cmd, "upload"))
 			exynos_pmu_write(EXYNOS_PMU_INFORM3, SEC_RESET_REASON_UPLOAD);
 		else if (!strcmp(cmd, "secure"))
@@ -201,6 +207,10 @@ static void sec_reboot(enum reboot_mode reboot_mode, const char *cmd)
 		else if (!strncmp(cmd, "debug", 5)
 			 && !kstrtoul(cmd + 5, 0, &value))
 			exynos_pmu_write(EXYNOS_PMU_INFORM3, SEC_RESET_SET_DEBUG | value);
+#ifdef CONFIG_MUIC_S2MU005
+		else if (!strcmp(cmd, "muic_1k"))
+			exynos_pmu_write(EXYNOS_PMU_INFORM3, SEC_RESET_REASON_MUIC_1K);
+#endif
 #ifdef CONFIG_SEC_DEBUG_MDM_SEPERATE_CRASH
 		else if (!strncmp(cmd, "cpdebug", 7)
 			 && !kstrtoul(cmd + 7, 0, &value))

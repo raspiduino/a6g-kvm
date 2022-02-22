@@ -38,6 +38,7 @@
 #include <linux/of_gpio.h>
 #include <linux/suspend.h>
 #include <linux/wakeup_reason.h>
+#include <soc/samsung/exynos-powermode.h>
 
 #include <video/mipi_display.h>
 
@@ -46,6 +47,7 @@
 #include "decon.h"
 #include "panels/dsim_panel.h"
 #include "decon_board.h"
+#include "panels/dd.h"
 
 #define MHZ (1000 * 1000)
 
@@ -178,6 +180,7 @@ int dsim_write_data(struct dsim_device *dsim, unsigned int data_id,
 		goto err_exit;
 	}
 	DISP_SS_EVENT_LOG_CMD(&dsim->sd, data_id, data0);
+	dsim_write_data_dump(dsim, data_id, data0, data1);
 
 	switch (data_id) {
 	/* short packet types of packet types for command. */
@@ -445,7 +448,7 @@ int dsim_read_data(struct dsim_device *dsim, u32 data_id,
 
 	/* Read request will be sent at safe region */
 	if (dsim->lcd_info.mode == DECON_VIDEO_MODE)
-		decon_reg_wait_linecnt_is_safe_timeout(DECON_INT, dsim->id, 35 * 1000, (dsim->lcd_info.yres >> 2));
+		decon_reg_wait_linecnt_is_safe_timeout(DECON_INT, dsim->id, 35 * 1000, (dsim->lcd_info.yres >> 1));
 
 	/* Read request */
 	dsim_write_data(dsim, data_id, addr, 0);
@@ -827,6 +830,7 @@ static int dsim_enable(struct dsim_device *dsim)
 
 enable_hs_clk:
 	dsim_reset_panel_wait(dsim);
+	dsim_clocks_info(dsim);
 #endif
 	dsim_reg_start(dsim->id, &dsim->clks_param.clks, DSIM_LANE_CLOCK | dsim->data_lane);
 
@@ -1393,6 +1397,7 @@ static int dsim_enable_early_resume(struct dsim_device *dsim)
 {
 	struct irq_desc *desc;
 	int i;
+	struct decon_device *decon = get_decon_drvdata(0);
 
 	if (!dsim->enable_early_irq)
 		goto exit;
@@ -1405,7 +1410,13 @@ static int dsim_enable_early_resume(struct dsim_device *dsim)
 			dsim_info("%s: irq: %d, %s\n", __func__, dsim->enable_early_irq[i],
 				(desc && desc->action && desc->action->name) ? desc->action->name : "");
 			dsim->enable_early = DSIM_ENABLE_EARLY_REQUEST;
+
+			/* disable idle status for display */
+			exynos_update_ip_idle_status(decon->idle_ip_index, 0);
+			dsim_info("%s: exynos_update_ip_idle_status: idle: 0\n", __func__);
+
 			dsim_enable(dsim);
+
 			goto exit;
 		}
 	}
@@ -1431,12 +1442,26 @@ static int dsim_pm_notifier(struct notifier_block *nb,
 		unsigned long event, void *v)
 {
 	struct dsim_device *dsim = container_of(nb, struct dsim_device, pm_notifier);
+	struct decon_device *decon = get_decon_drvdata(0);
+	char *pm_notifier_events[] = {
+		"PM_HIBERNATION_PREPARE",
+		"PM_POST_HIBERNATION",
+		"PM_SUSPEND_PREPARE",
+		"PM_POST_SUSPEND",
+		"PM_RESTORE_PREPARE",
+		"PM_POST_RESTORE"
+	};
 
-	dev_info(dsim->dev, "%s: %ld\n", __func__, event);
+	dsim_info("%s: %ld, %s\n", __func__, event, event > PM_POST_RESTORE ? "PM_NOTIFIER_UNKNOWN" : pm_notifier_events[event]);
 
 	switch (event) {
 	case PM_SUSPEND_PREPARE:
 		dsim_enable_early_suspend(dsim);
+
+		/* enable idle status for display */
+		exynos_update_ip_idle_status(decon->idle_ip_index, 1);
+		dsim_info("%s: exynos_update_ip_idle_status: idle: 1\n", __func__);
+
 		return NOTIFY_OK;
 	case PM_POST_SUSPEND:
 		dsim_enable_early_resume(dsim);

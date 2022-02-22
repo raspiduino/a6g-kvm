@@ -778,7 +778,10 @@ int request_exposure(struct fimc_is_sensor_interface *itf,
 	int ret = 0;
 	u32 i = 0;
 	u32 end_index = 0;
+
+#ifdef USE_FACE_UNLOCK_AE_AWB_INIT
 	struct fimc_is_device_sensor_peri *sensor_peri = NULL;
+#endif
 
 	BUG_ON(!itf);
 	BUG_ON(itf->magic != SENSOR_INTERFACE_MAGIC);
@@ -806,6 +809,7 @@ int request_exposure(struct fimc_is_sensor_interface *itf,
 		}
 	}
 
+#ifdef USE_FACE_UNLOCK_AE_AWB_INIT
 	/* store exposure for use initial AE */
 	sensor_peri = container_of(itf, struct fimc_is_device_sensor_peri, sensor_interface);
 	if (!sensor_peri) {
@@ -817,6 +821,8 @@ int request_exposure(struct fimc_is_sensor_interface *itf,
 		sensor_peri->cis.last_ae_setting.long_exposure = long_exposure;
 		sensor_peri->cis.last_ae_setting.exposure = short_exposure;
 	}
+#endif
+
 p_err:
 	return ret;
 }
@@ -937,7 +943,10 @@ int request_gain(struct fimc_is_sensor_interface *itf,
 	int ret = 0;
 	u32 i = 0;
 	u32 end_index = 0;
+
+#ifdef USE_FACE_UNLOCK_AE_AWB_INIT
 	struct fimc_is_device_sensor_peri *sensor_peri = NULL;
+#endif
 
 	BUG_ON(!itf);
 	BUG_ON(itf->magic != SENSOR_INTERFACE_MAGIC);
@@ -979,6 +988,7 @@ int request_gain(struct fimc_is_sensor_interface *itf,
 		}
 	}
 
+#ifdef USE_FACE_UNLOCK_AE_AWB_INIT
 	/* store gain for use initial AE */
 	sensor_peri = container_of(itf, struct fimc_is_device_sensor_peri, sensor_interface);
 	if (!sensor_peri) {
@@ -992,6 +1002,8 @@ int request_gain(struct fimc_is_sensor_interface *itf,
 		sensor_peri->cis.last_ae_setting.analog_gain = short_analog_gain;
 		sensor_peri->cis.last_ae_setting.digital_gain = short_digital_gain;
 	}
+#endif
+
 p_err:
 	return ret;
 }
@@ -1770,6 +1782,7 @@ int set_sensor_3a_mode(struct fimc_is_sensor_interface *itf,
 	return 0;
 }
 
+#ifdef USE_FACE_UNLOCK_AE_AWB_INIT
 int get_initial_exposure_gain_of_sensor(struct fimc_is_sensor_interface *itf,
 	u32 *long_expo,
 	u32 *long_again,
@@ -1839,6 +1852,7 @@ int get_initial_exposure_gain_of_sensor(struct fimc_is_sensor_interface *itf,
 
 	return 0;
 }
+#endif
 
 /* In order to change a current CIS mode when an user select the WDR (long and short exposure) mode or the normal AE mo */
 int change_cis_mode(struct fimc_is_sensor_interface *itf,
@@ -2260,7 +2274,9 @@ int init_sensor_interface(struct fimc_is_sensor_interface *itf)
 	itf->cis_itf_ops.get_module_id = get_module_id;
 	itf->cis_itf_ops.get_module_position = get_module_position;
 	itf->cis_itf_ops.set_sensor_3a_mode = set_sensor_3a_mode;
+#ifdef USE_FACE_UNLOCK_AE_AWB_INIT
 	itf->cis_itf_ops.get_initial_exposure_gain_of_sensor = get_initial_exposure_gain_of_sensor;
+#endif
 	itf->cis_ext_itf_ops.change_cis_mode = change_cis_mode;
 
 	/* struct fimc_is_cis_event_ops */

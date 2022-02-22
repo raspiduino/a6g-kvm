@@ -67,6 +67,10 @@
 
 #include <trace/events/sched.h>
 
+#ifdef CONFIG_SECURITY_DEFEX
+#include <linux/defex.h>
+#endif
+
 int suid_dumpable = 0;
 
 static LIST_HEAD(formats);
@@ -1052,14 +1056,15 @@ killed:
 	return -EAGAIN;
 }
 
-char *__get_task_comm(char *buf, size_t buf_size, struct task_struct *tsk)
+char *get_task_comm(char *buf, struct task_struct *tsk)
 {
+	/* buf must be at least sizeof(tsk->comm) in size */
 	task_lock(tsk);
-	strncpy(buf, tsk->comm, buf_size);
+	strncpy(buf, tsk->comm, sizeof(tsk->comm));
 	task_unlock(tsk);
 	return buf;
 }
-EXPORT_SYMBOL_GPL(__get_task_comm);
+EXPORT_SYMBOL_GPL(get_task_comm);
 
 /*
  * These functions flushes out all traces of the currently running executable
@@ -1443,16 +1448,11 @@ int search_binary_handler(struct linux_binprm *bprm)
 		    printable(bprm->buf[2]) && printable(bprm->buf[3]))
 			return retval;
 		if (request_module(
-			      "binfmt-%04x", *(ushort *)(bprm->buf + 2)) < 0) {
-			task_integrity_delayed_reset(current);
+			      "binfmt-%04x", *(ushort *)(bprm->buf + 2)) < 0)
 			return retval;
-		}
 		need_retry = false;
 		goto retry;
 	}
-
-	if (retval < 0)
-		task_integrity_delayed_reset(current);
 
 	return retval;
 }
@@ -1601,6 +1601,8 @@ static int exec_binprm(struct linux_binprm *bprm)
 		trace_sched_process_exec(current, old_pid, bprm);
 		ptrace_event(PTRACE_EVENT_EXEC, old_vpid);
 		proc_exec_connector(current);
+	} else {
+		task_integrity_delayed_reset(current);
 	}
 
 	return ret;
@@ -1657,6 +1659,15 @@ static int do_execve_common(struct filename *filename,
 	retval = PTR_ERR(file);
 	if (IS_ERR(file))
 		goto out_unmark;
+
+#ifdef CONFIG_SECURITY_DEFEX
+	retval = task_defex_enforce(current, file, -__NR_execve);
+	if (retval < 0) {
+		bprm->file = file;
+		retval = -EPERM;
+		goto out_unmark;
+	}
+#endif
 
 	sched_exec();
 
@@ -1788,9 +1799,6 @@ SYSCALL_DEFINE3(execve,
 		const char __user *const __user *, argv,
 		const char __user *const __user *, envp)
 {
-	struct filename *path = getname(filename);
-	if (!IS_ERR(path)) {
-
 #if defined CONFIG_SEC_RESTRICT_FORK
 		if(CHECK_ROOT_UID(current)){
 			if(sec_restrict_fork()){
@@ -1802,8 +1810,6 @@ SYSCALL_DEFINE3(execve,
 			}
 		}
 #endif	// End of CONFIG_SEC_RESTRICT_FORK
-	}
-
 	return do_execve(getname(filename), argv, envp);
 }
 #ifdef CONFIG_COMPAT

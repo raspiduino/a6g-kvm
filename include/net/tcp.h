@@ -389,7 +389,6 @@ extern int tcp_use_userconfig_sysctl_handler(struct ctl_table *, int,
 extern int tcp_proc_delayed_ack_control(struct ctl_table *, int,
 				void __user *, size_t *, loff_t *);
 
-void tcp_enter_quickack_mode(struct sock *sk, unsigned int max_quickacks);
 static inline void tcp_dec_quickack_mode(struct sock *sk,
 					 const unsigned int pkts)
 {
@@ -548,7 +547,6 @@ int tcp_send_synack(struct sock *);
 bool tcp_syn_flood_action(struct sock *sk, const struct sk_buff *skb,
 			  const char *proto);
 void tcp_push_one(struct sock *, unsigned int mss_now);
-void __tcp_send_ack(struct sock *sk, u32 rcv_nxt);
 void tcp_send_ack(struct sock *sk);
 void tcp_send_delayed_ack(struct sock *sk);
 void tcp_send_loss_probe(struct sock *sk);
@@ -1130,11 +1128,9 @@ static inline int tcp_space_from_win(int win)
 
 static inline int tcp_win_from_space(int space)
 {
-	int tcp_adv_win_scale = sysctl_tcp_adv_win_scale;
-
-	return tcp_adv_win_scale <= 0 ?
-		(space>>(-tcp_adv_win_scale)) :
-		space - (space>>tcp_adv_win_scale);
+	return sysctl_tcp_adv_win_scale<=0 ?
+		(space>>(-sysctl_tcp_adv_win_scale)) :
+		space - (space>>sysctl_tcp_adv_win_scale);
 }
 
 /* Note: caller must be prepared to deal with negative returns */ 
@@ -1635,8 +1631,6 @@ static inline bool tcp_stream_memory_free(const struct sock *sk)
 
 	return notsent_bytes < tcp_notsent_lowat(tp);
 }
-
-extern int tcp_nuke_addr(struct net *net, struct sockaddr *addr);
 
 #ifdef CONFIG_PROC_FS
 int tcp4_proc_init(void);

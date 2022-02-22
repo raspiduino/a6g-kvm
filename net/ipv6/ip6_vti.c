@@ -195,13 +195,10 @@ static struct ip6_tnl *vti6_tnl_create(struct net *net, struct __ip6_tnl_parm *p
 	char name[IFNAMSIZ];
 	int err;
 
-	if (p->name[0]) {
-		if (!dev_valid_name(p->name))
-			goto failed;
+	if (p->name[0])
 		strlcpy(name, p->name, IFNAMSIZ);
-	} else {
+	else
 		sprintf(name, "ip6_vti%%d");
-	}
 
 	dev = alloc_netdev(sizeof(*t), name, NET_NAME_UNKNOWN, vti6_dev_setup);
 	if (dev == NULL)
@@ -565,7 +562,7 @@ static int vti6_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
 
 	if (type == NDISC_REDIRECT)
 		ip6_redirect(skb, net, skb->dev->ifindex, 0,
-						sock_net_uid(net, NULL));
+			     sock_net_uid(net, NULL));
 	else
 		ip6_update_pmtu(skb, net, info, 0, 0, sock_net_uid(net, NULL));
 	xfrm_state_put(x);

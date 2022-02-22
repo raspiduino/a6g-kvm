@@ -5866,9 +5866,7 @@ static int fimc_is_ischain_3aa_shot(struct fimc_is_device_ischain *device,
 	if (sensor) {
 		if ((frame->shot->ctl.aa.awbMode == AA_AWBMODE_WB_AUTO)
 			&& (frame->fcount <= sensor->init_wb_cnt)
-#ifdef USE_FACE_UNLOCK_AE_AWB_INIT
 			&& (frame->shot->ctl.aa.sceneMode == AA_SCENE_MODE_FACE_LOCK)
-#endif
 			&& memcmp(sensor->init_wb, sensor->chk_wb, sizeof(float) * WB_GAIN_COUNT)) {
 
 			/* for applying init AWB feature,

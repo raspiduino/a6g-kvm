@@ -189,6 +189,7 @@
 #define under_HD(ctx)		(((ctx)->img_width * (ctx)->img_height) <= MFC_HD_RES)
 #define not_coded_cond(ctx)	is_mpeg4vc1(ctx)
 #define interlaced_cond(ctx)	is_mpeg4vc1(ctx) || is_mpeg2(ctx) || is_h264(ctx)
+#define CODEC_MBAFF(ctx)	is_h264(ctx)
 #define on_res_change(ctx)	((ctx)->state >= MFCINST_RES_CHANGE_INIT &&	\
 				 (ctx)->state <= MFCINST_RES_CHANGE_END)
 #define need_to_wait_frame_start(ctx)		\

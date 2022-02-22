@@ -229,7 +229,7 @@ int perf_cpu_time_max_percent_handler(struct ctl_table *table, int write,
 				void __user *buffer, size_t *lenp,
 				loff_t *ppos)
 {
-	int ret = proc_dointvec_minmax(table, write, buffer, lenp, ppos);
+	int ret = proc_dointvec(table, write, buffer, lenp, ppos);
 
 	if (ret || !write)
 		return ret;
@@ -330,6 +330,11 @@ extern __weak const char *perf_pmu_name(void)
 static inline u64 perf_clock(void)
 {
 	return local_clock();
+}
+
+static inline u64 perf_event_clock(struct perf_event *event)
+{
+	return event->clock();
 }
 
 static inline struct perf_cpu_context *
@@ -3225,7 +3230,10 @@ static void __perf_event_read(void *info)
 
 static inline u64 perf_event_count(struct perf_event *event)
 {
-	return local64_read(&event->count) + atomic64_read(&event->child_count);
+	if (event->pmu->count)
+		return event->pmu->count(event);
+
+	return __perf_event_count(event);
 }
 
 static u64 perf_event_read(struct perf_event *event)
@@ -3311,7 +3319,7 @@ find_lively_task_by_vpid(pid_t vpid)
 
 	/* Reuse ptrace permission checks for now. */
 	err = -EACCES;
-	if (!ptrace_may_access(task, PTRACE_MODE_READ_REALCREDS))
+	if (!ptrace_may_access(task, PTRACE_MODE_READ))
 		goto errout;
 
 	return task;
@@ -3941,14 +3949,7 @@ retry:
 		goto retry;
 	}
 
-	if (event->attr.freq) {
-		event->attr.sample_freq = value;
-	} else {
-		event->attr.sample_period = value;
-		event->hw.sample_period = value;
-	}
-
-	local64_set(&event->hw.period_left, 0);
+	__perf_event_period(&pe);
 	raw_spin_unlock_irq(&ctx->lock);
 
 	return 0;
@@ -4803,7 +4804,7 @@ static void __perf_event_header__init_id(struct perf_event_header *header,
 	}
 
 	if (sample_type & PERF_SAMPLE_TIME)
-		data->time = perf_clock();
+		data->time = perf_event_clock(event);
 
 	if (sample_type & (PERF_SAMPLE_ID | PERF_SAMPLE_IDENTIFIER))
 		data->id = primary_event_id(event);
@@ -4880,6 +4881,9 @@ static void perf_output_read_one(struct perf_output_handle *handle,
 	__output_copy(handle, values, n * sizeof(u64));
 }
 
+/*
+ * XXX PERF_FORMAT_GROUP vs inherited events seems difficult.
+ */
 static void perf_output_read_group(struct perf_output_handle *handle,
 			    struct perf_event *event,
 			    u64 enabled, u64 running)
@@ -4897,8 +4901,7 @@ static void perf_output_read_group(struct perf_output_handle *handle,
 	if (read_format & PERF_FORMAT_TOTAL_TIME_RUNNING)
 		values[n++] = running;
 
-	if ((leader != event) &&
-	    (leader->state == PERF_EVENT_STATE_ACTIVE))
+	if (leader != event)
 		leader->pmu->read(leader);
 
 	values[n++] = perf_event_count(leader);
@@ -4925,13 +4928,6 @@ static void perf_output_read_group(struct perf_output_handle *handle,
 #define PERF_FORMAT_TOTAL_TIMES (PERF_FORMAT_TOTAL_TIME_ENABLED|\
 				 PERF_FORMAT_TOTAL_TIME_RUNNING)
 
-/*
- * XXX PERF_SAMPLE_READ vs inherited events seems difficult.
- *
- * The problem is that its both hard and excessively expensive to iterate the
- * child list, not to mention that its impossible to IPI the children running
- * on another CPU, from interrupt/NMI context.
- */
 static void perf_output_read(struct perf_output_handle *handle,
 			     struct perf_event *event)
 {
@@ -6370,8 +6366,6 @@ void perf_tp_event(u64 addr, u64 count, void *record, int entry_size,
 			goto unlock;
 
 		list_for_each_entry_rcu(event, &ctx->event_list, event_entry) {
-			if (event->cpu != smp_processor_id())
-				continue;
 			if (event->attr.type != PERF_TYPE_TRACEPOINT)
 				continue;
 			if (event->attr.config != entry->type)
@@ -7198,7 +7192,9 @@ perf_event_alloc(struct perf_event_attr *attr, int cpu,
 			event->hw.bp_target = task;
 #endif
 	}
-
+	event->clock = &local_clock;
+	if (parent_event)
+		event->clock = parent_event->clock;
 	if (!overflow_handler && parent_event) {
 		overflow_handler = parent_event->overflow_handler;
 		context = parent_event->overflow_handler_context;
@@ -7220,10 +7216,9 @@ perf_event_alloc(struct perf_event_attr *attr, int cpu,
 	local64_set(&hwc->period_left, hwc->sample_period);
 
 	/*
-	 * We currently do not support PERF_SAMPLE_READ on inherited events.
-	 * See perf_output_read().
+	 * we currently do not support PERF_FORMAT_GROUP on inherited events
 	 */
-	if (attr->inherit && (attr->sample_type & PERF_SAMPLE_READ))
+	if (attr->inherit && (attr->read_format & PERF_FORMAT_GROUP))
 		goto err_ns;
 
 	pmu = perf_init_event(event);
@@ -7370,9 +7365,9 @@ static int perf_copy_attr(struct perf_event_attr __user *uattr,
 		 * __u16 sample size limit.
 		 */
 		if (attr->sample_stack_user >= USHRT_MAX)
-			return -EINVAL;
+			ret = -EINVAL;
 		else if (!IS_ALIGNED(attr->sample_stack_user, sizeof(u64)))
-			return -EINVAL;
+			ret = -EINVAL;
 	}
 
 out:
@@ -7707,6 +7702,11 @@ SYSCALL_DEFINE5(perf_event_open,
 				move_group = 0;
 			}
 		}
+		/* 
+		 * See perf_event_ctx_lock() for comments on the details
+		 * of swizzling perf_event::ctx.
+		 */
+		mutex_lock_double(&gctx->mutex, &ctx->mutex);
 
 		/*
 		 * See perf_event_ctx_lock() for comments on the details
@@ -7738,7 +7738,6 @@ SYSCALL_DEFINE5(perf_event_open,
 		 * the old lists, before installing it on new lists.
 		 */
 		synchronize_rcu();
-
 		perf_install_in_context(ctx, group_leader, group_leader->cpu);
 		get_ctx(ctx);
 		list_for_each_entry(sibling, &group_leader->sibling_list,
@@ -8542,6 +8541,18 @@ void __init perf_event_init(void)
 	 */
 	BUILD_BUG_ON((offsetof(struct perf_event_mmap_page, data_head))
 		     != 1024);
+}
+
+ssize_t perf_event_sysfs_show(struct device *dev, struct device_attribute *attr,
+			      char *page)
+{
+	struct perf_pmu_events_attr *pmu_attr =
+		container_of(attr, struct perf_pmu_events_attr, attr);
+
+	if (pmu_attr->event_str)
+		return sprintf(page, "%s\n", pmu_attr->event_str);
+
+	return 0;
 }
 
 static int __init perf_event_sysfs_init(void)

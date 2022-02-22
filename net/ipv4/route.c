@@ -122,10 +122,8 @@ static int ip_rt_redirect_silence __read_mostly	= ((HZ / 50) << (9 + 1));
 static int ip_rt_error_cost __read_mostly	= HZ;
 static int ip_rt_error_burst __read_mostly	= 5 * HZ;
 static int ip_rt_mtu_expires __read_mostly	= 10 * 60 * HZ;
-static u32 ip_rt_min_pmtu __read_mostly		= 512 + 20 + 20;
+static int ip_rt_min_pmtu __read_mostly		= 512 + 20 + 20;
 static int ip_rt_min_advmss __read_mostly	= 256;
-
-static int ip_min_valid_pmtu __read_mostly	= IPV4_MIN_MTU;
 
 /*
  *	Interface to generic destination cache.
@@ -525,13 +523,14 @@ static void __build_flow_key(const struct net *net, struct flowi4 *fl4,
 static void build_skb_flow_key(struct flowi4 *fl4, const struct sk_buff *skb,
 			       const struct sock *sk)
 {
+	const struct net *net = dev_net(skb->dev);
 	const struct iphdr *iph = ip_hdr(skb);
 	int oif = skb->dev->ifindex;
 	u8 tos = RT_TOS(iph->tos);
 	u8 prot = iph->protocol;
 	u32 mark = skb->mark;
 
-	__build_flow_key(sock_net(sk), fl4, sk, iph, oif, tos, prot, mark, 0);
+	__build_flow_key(net, fl4, sk, iph, oif, tos, prot, mark, 0);
 }
 
 static void build_sk_flow_key(struct flowi4 *fl4, const struct sock *sk)
@@ -793,6 +792,7 @@ static void ip_do_redirect(struct dst_entry *dst, struct sock *sk, struct sk_buf
 	struct rtable *rt;
 	struct flowi4 fl4;
 	const struct iphdr *iph = (const struct iphdr *) skb->data;
+	struct net *net = dev_net(skb->dev);
 	int oif = skb->dev->ifindex;
 	u8 tos = RT_TOS(iph->tos);
 	u8 prot = iph->protocol;
@@ -800,7 +800,7 @@ static void ip_do_redirect(struct dst_entry *dst, struct sock *sk, struct sk_buf
 
 	rt = (struct rtable *) dst;
 
-	__build_flow_key(sock_net(sk), &fl4, sk, iph, oif, tos, prot, mark, 0);
+	__build_flow_key(net, &fl4, sk, iph, oif, tos, prot, mark, 0);
 	__ip_do_redirect(rt, skb, &fl4, true);
 }
 
@@ -2646,8 +2646,7 @@ static struct ctl_table ipv4_route_table[] = {
 		.data		= &ip_rt_min_pmtu,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &ip_min_valid_pmtu,
+		.proc_handler	= proc_dointvec,
 	},
 	{
 		.procname	= "min_adv_mss",

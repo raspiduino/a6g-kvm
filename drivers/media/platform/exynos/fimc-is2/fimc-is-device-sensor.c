@@ -93,6 +93,39 @@ int fimc_is_search_sensor_module(struct fimc_is_device_sensor *device,
 	return ret;
 }
 
+int fimc_is_search_sensor_module_with_position(struct fimc_is_device_sensor *device,
+	u32 sensor_id, u32 position, struct fimc_is_module_enum **module)
+{
+	int ret = 0;
+	u32 mindex, mmax;
+	struct fimc_is_module_enum *module_enum;
+	struct fimc_is_resourcemgr *resourcemgr;
+
+	resourcemgr = device->resourcemgr;
+	module_enum = device->module_enum;
+	*module = NULL;
+
+	if (resourcemgr == NULL) {
+		mwarn("resourcemgr is NULL", device);
+		return -EINVAL;
+	}
+
+	mmax = atomic_read(&resourcemgr->rsccount_module);
+	for (mindex = 0; mindex < mmax; mindex++) {
+		if (module_enum[mindex].sensor_id == sensor_id && module_enum[mindex].position == position) {
+			*module = &module_enum[mindex];
+			break;
+		}
+	}
+
+	if (mindex >= mmax) {
+		merr("module(%d) is not found", device, sensor_id);
+		ret = -EINVAL;
+	}
+
+	return ret;
+}
+
 int fimc_is_sensor_g_module(struct fimc_is_device_sensor *device,
 	struct fimc_is_module_enum **module)
 {
@@ -1281,7 +1314,7 @@ static int fimc_is_sensor_probe(struct platform_device *pdev)
 	device->pdev = pdev;
 	device->private_data = core;
 	device->pdata = pdata;
-	
+
 #ifdef ENABLE_INIT_AWB
 	memset(device->init_wb, 0, sizeof(float) * WB_GAIN_COUNT);
 	memset(device->last_wb, 0, sizeof(float) * WB_GAIN_COUNT);

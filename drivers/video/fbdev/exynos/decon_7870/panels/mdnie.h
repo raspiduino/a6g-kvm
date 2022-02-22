@@ -17,9 +17,9 @@ enum SCENARIO {
 	UI_MODE,
 	VIDEO_NORMAL_MODE,
 	CAMERA_MODE = 4,
-	CAMERA_SWA_MODE,
+	NAVI_MODE,
 	GALLERY_MODE,
-	GALLERY_SWA_MODE,
+	VT_MODE,
 	BROWSER_MODE,
 	EBOOK_MODE,
 	EMAIL_MODE,
@@ -145,9 +145,6 @@ struct mdnie_tune {
 	struct mdnie_trans_info	*trans_info;
 	struct mdnie_night_info	*night_info;
 	struct mdnie_color_lens_info *color_lens_info;
-
-	struct rgb_info		*wrgb_swa;
-
 	unsigned char **coordinate_table;
 	unsigned char **adjust_ldu_table;
 	unsigned char *night_mode_table;
@@ -195,6 +192,8 @@ struct mdnie_info {
 	unsigned int		coordinate[2];
 
 	char			path[50];
+
+	void			*dd_mdnie;
 
 	void			*data;
 

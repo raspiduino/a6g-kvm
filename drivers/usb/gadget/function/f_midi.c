@@ -146,7 +146,7 @@ static struct usb_ms_header_descriptor midi_ms_header_desc /*__initdata */ = {
 };
 
 /* B.5.1  Standard Bulk OUT Endpoint Descriptor */
-static struct usb_endpoint_descriptor bulk_out_desc = {
+static struct usb_endpoint_descriptor midi_bulk_out_desc = {
 	.bLength =		USB_DT_ENDPOINT_AUDIO_SIZE,
 	.bDescriptorType =	USB_DT_ENDPOINT,
 	.bEndpointAddress =	USB_DIR_OUT,
@@ -362,9 +362,7 @@ static int f_midi_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 	/* allocate a bunch of read buffers and queue them all at once. */
 	for (i = 0; i < midi->qlen && err == 0; i++) {
 		struct usb_request *req =
-			midi_alloc_ep_req(midi->out_ep,
-				max_t(unsigned, midi->buflen,
-					bulk_out_desc.wMaxPacketSize));
+			midi_alloc_ep_req(midi->out_ep, midi->buflen);
 		if (req == NULL)
 			return -ENOMEM;
 
@@ -766,7 +764,7 @@ f_midi_bind(struct usb_configuration *c, struct usb_function *f)
 		goto fail;
 	midi->in_ep->driver_data = cdev;	/* claim */
 
-	midi->out_ep = usb_ep_autoconfig(cdev->gadget, &bulk_out_desc);
+	midi->out_ep = usb_ep_autoconfig(cdev->gadget, &midi_bulk_out_desc);
 	if (!midi->out_ep)
 		goto fail;
 	midi->out_ep->driver_data = cdev;	/* claim */
@@ -862,7 +860,7 @@ f_midi_bind(struct usb_configuration *c, struct usb_function *f)
 	midi_ms_in_desc.bNumEmbMIDIJack = midi->out_ports;
 
 	/* ... and add them to the list */
-	midi_function[i++] = (struct usb_descriptor_header *) &bulk_out_desc;
+	midi_function[i++] = (struct usb_descriptor_header *) &midi_bulk_out_desc;
 	midi_function[i++] = (struct usb_descriptor_header *) &midi_ms_out_desc;
 	midi_function[i++] = (struct usb_descriptor_header *) &midi_bulk_in_desc;
 	midi_function[i++] = (struct usb_descriptor_header *) &midi_ms_in_desc;
@@ -880,7 +878,7 @@ f_midi_bind(struct usb_configuration *c, struct usb_function *f)
 
 	if (gadget_is_dualspeed(c->cdev->gadget)) {
 		midi_bulk_in_desc.wMaxPacketSize = cpu_to_le16(midi->buflen);
-		bulk_out_desc.wMaxPacketSize = cpu_to_le16(midi->buflen);
+		midi_bulk_out_desc.wMaxPacketSize = cpu_to_le16(midi->buflen);
 		f->hs_descriptors = usb_copy_descriptors(midi_function);
 		if (!f->hs_descriptors)
 			goto fail_f_midi;

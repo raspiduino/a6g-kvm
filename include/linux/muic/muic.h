@@ -77,6 +77,11 @@ enum {
 	SWITCH_SEL_AFC_DISABLE_MASK	= 0x100,
 };
 
+/* bootparam CHARGING_MODE */
+enum {
+	CH_MODE_AFC_DISABLE_VAL = 0x31, /* char '1' */
+};
+
 /* MUIC ADC table */
 typedef enum {
 	ADC_GND			= 0x00,
@@ -193,6 +198,7 @@ typedef enum {
 	ATTACHED_DEV_POGO_MUIC,
 	ATTACHED_DEV_CHARGING_POGO_VB_MUIC,
 	ATTACHED_DEV_CHECK_OCP,
+	ATTACHED_DEV_FACTORY_UART_MUIC,
 	ATTACHED_DEV_UNKNOWN_MUIC,
 	ATTACHED_DEV_NUM,
 } muic_attached_dev_t;
@@ -231,6 +237,8 @@ struct muic_platform_data {
 	int silent_chg_change_state;
 #endif
 
+	bool is_factory_uart;
+
 	/* muic switch dev register function for DockObserver */
 	void (*init_switch_dev_cb) (void);
 	void (*cleanup_switch_dev_cb) (void);
@@ -248,6 +256,7 @@ struct muic_platform_data {
 };
 
 extern int get_switch_sel(void);
+extern int get_afc_mode(void);
 extern void muic_disable_otg_detect(void);
 extern struct device *switch_device;
 #ifdef CONFIG_SEC_FACTORY

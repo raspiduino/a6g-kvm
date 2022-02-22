@@ -356,6 +356,7 @@ p_err:
 	return ret;
 }
 
+#ifdef USE_FACE_UNLOCK_AE_AWB_INIT
 int sensor_cis_set_initial_exposure(struct v4l2_subdev *subdev)
 {
 	struct fimc_is_cis *cis;
@@ -377,3 +378,4 @@ int sensor_cis_set_initial_exposure(struct v4l2_subdev *subdev)
 
 	return 0;
 }
+#endif

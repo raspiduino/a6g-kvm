@@ -1,4 +1,3 @@
-/* Copyright (c) 2015 Samsung Electronics Co., Ltd. */
 /*
  * INET		An implementation of the TCP/IP protocol suite for the LINUX
  *		operating system.  INET is implemented using the  BSD Socket
@@ -77,6 +76,7 @@
 #include <linux/atomic.h>
 #include <net/dst.h>
 #include <net/checksum.h>
+#include <net/tcp_states.h>
 #include <linux/net_tstamp.h>
 #include <net/tcp_states.h>
 
@@ -96,6 +96,12 @@ void mem_cgroup_sockets_destroy(struct mem_cgroup *memcg)
 {
 }
 #endif
+
+/* START_OF_KNOX_NPA */
+#define NAP_PROCESS_NAME_LEN	128
+#define NAP_DOMAIN_NAME_LEN	255
+/* END_OF_KNOX_NPA */
+
 /*
  * This structure really needs to be cleaned up.
  * Most of it is for TCP, and not used by any of
@@ -389,8 +395,8 @@ struct sock {
 				sk_no_check_rx : 1,
 				sk_userlocks : 4,
 				sk_protocol  : 8,
-				sk_type      : 16;
 #define SK_PROTOCOL_MAX U8_MAX
+				sk_type      : 16;
 	kmemcheck_bitfield_end(flags);
 	int			sk_wmem_queued;
 	gfp_t			sk_allocation;
@@ -436,15 +442,18 @@ struct sock {
 	kuid_t			sk_uid;
 	u32			sk_classid;
 	struct cg_proto		*sk_cgrp;
-    /* START_OF_KNOX_VPN */
+	/* START_OF_KNOX_NPA */
 	uid_t			knox_uid;
 	pid_t			knox_pid;
-    __be32          sk_udp_daddr;
-    __be32          sk_udp_saddr;
-    __be16          sk_udp_dport;
-    __be16          sk_udp_sport;
-    char domain_name[255];
-    /* END_OF_KNOX_VPN */
+	uid_t			knox_dns_uid;
+	char 			domain_name[NAP_DOMAIN_NAME_LEN];
+	char			process_name[NAP_PROCESS_NAME_LEN];
+	uid_t			knox_puid;
+	pid_t			knox_ppid;
+	char			parent_process_name[NAP_PROCESS_NAME_LEN];
+	pid_t			knox_dns_pid;
+	char 			dns_process_name[NAP_PROCESS_NAME_LEN];
+	/* END_OF_KNOX_NPA */
 	void			(*sk_state_change)(struct sock *sk);
 	void			(*sk_data_ready)(struct sock *sk);
 	void			(*sk_write_space)(struct sock *sk);
@@ -2308,10 +2317,11 @@ static inline struct sock *skb_steal_sock(struct sk_buff *skb)
 
 /* This helper checks if a socket is a full socket,
  * ie _not_ a timewait or request socket.
+ * TODO: Check for TCPF_NEW_SYN_RECV when that starts to exist.
  */
 static inline bool sk_fullsock(const struct sock *sk)
 {
-	return (1 << sk->sk_state) & ~(TCPF_TIME_WAIT | TCPF_NEW_SYN_RECV);
+	return (1 << sk->sk_state) & ~(TCPF_TIME_WAIT);
 }
 
 void sock_enable_timestamp(struct sock *sk, int flag);

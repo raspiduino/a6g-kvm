@@ -1,13 +1,10 @@
-/* linux/drivers/video/backlight/s6d78a0_qhd_gppiris_mipi_lcd.c
- *
- * Samsung SoC MIPI LCD CONTROL functions
- *
- * Copyright (c) 2015 Samsung Electronics
+/*
+ * Copyright (c) Samsung Electronics Co., Ltd.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
-*/
+ */
 
 #include <linux/lcd.h>
 #include <linux/gpio.h>
@@ -22,7 +19,7 @@
 #include "../decon_notify.h"
 #include <linux/pwm.h>
 #include "s6d78a0_qhd_gppiris_param.h"
-#include "backlight_tuning.h"
+#include "dd.h"
 
 #define POWER_IS_ON(pwr)			(pwr <= FB_BLANK_NORMAL)
 #define LEVEL_IS_HBM(brightness)		(brightness == EXTEND_BRIGHTNESS)
@@ -44,7 +41,6 @@ struct lcd_info {
 		};
 		u32 value;
 	} id_info;
-	unsigned char dump_info[3];
 	struct dsim_device *dsim;
 	struct mutex lock;
 	int lux;
@@ -524,7 +520,7 @@ static ssize_t window_type_show(struct device *dev, struct device_attribute *att
 {
 	struct lcd_info *lcd = dev_get_drvdata(dev);
 
-	sprintf(buf, "%x %x %x\n", lcd->id_info.id[0], lcd->id_info.id[1], lcd->id_info.id[2]);
+	sprintf(buf, "%02x %02x %02x\n", lcd->id_info.id[0], lcd->id_info.id[1], lcd->id_info.id[2]);
 
 	return strlen(buf);
 }
@@ -563,7 +559,7 @@ static void lcd_init_sysfs(struct lcd_info *lcd)
 	if (ret < 0)
 		dev_err(&lcd->ld->dev, "failed to add lcd sysfs\n");
 
-	init_bl_curve_debugfs(lcd->bd, brightness_table, NULL);
+	init_debugfs_backlight(lcd->bd, brightness_table, NULL);
 }
 
 static int dsim_panel_probe(struct dsim_device *dsim)

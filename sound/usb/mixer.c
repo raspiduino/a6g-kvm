@@ -883,14 +883,6 @@ static void volume_control_quirks(struct usb_mixer_elem_info *cval,
 		}
 		break;
 
-	case USB_ID(0x0d8c, 0x0103):
-		if (!strcmp(kctl->id.name, "PCM Playback Volume")) {
-			usb_audio_info(chip,
-				 "set volume quirk for CM102-A+/102S+\n");
-			cval->min = -256;
-		}
-		break;
-
 	case USB_ID(0x0471, 0x0101):
 	case USB_ID(0x0471, 0x0104):
 	case USB_ID(0x0471, 0x0105):
@@ -1346,8 +1338,6 @@ static void build_feature_ctl(struct mixer_build *state, void *raw_desc,
 				SNDRV_CTL_ELEM_ACCESS_TLV_CALLBACK;
 		}
 	}
-
-	snd_usb_mixer_fu_apply_quirk(state->mixer, cval, unitid, kctl);
 
 	range = (cval->max - cval->min) / cval->res;
 	/*

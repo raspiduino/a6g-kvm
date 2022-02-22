@@ -73,6 +73,7 @@ struct a96t3x6_data {
 	bool expect_state;
 	bool sar_enable_off;
 	bool earjack;
+	u8 earjack_noise;
 #ifdef CONFIG_SEC_FACTORY
 	int irq_count;
 	int abnormal_mode;
@@ -90,6 +91,7 @@ struct a96t3x6_data {
 	u8 checksum_l;
 	u8 checksum_l_bin;
 	bool enabled;
+	bool resume_called;
 
 	int ldo_en;			/* ldo_en pin gpio */
 	int grip_int;			/* irq pin gpio */
@@ -418,6 +420,12 @@ static void a96t3x6_debug_work_func(struct work_struct *work)
 	static int hall_prev_state;
 	int hall_state;
 
+	if (data->resume_called == true) {
+		data->resume_called = false;
+		a96t3x6_sar_only_mode(data, 0);
+		schedule_delayed_work(&data->debug_work, msecs_to_jiffies(1000));
+		return;
+	}
 	hall_state = a96t3x6_get_hallic_state(data);
 	if (hall_state == HALL_CLOSE_STATE && hall_prev_state != hall_state) {
 		SENSOR_INFO("%s - hall is closed\n", __func__);
@@ -764,14 +772,20 @@ static ssize_t grip_sensing_change(struct device *dev,
 		return count;
 	}
 
-	data->earjack = earjack;
-
-	if (earjack == 1) {		/* earjack inserted */
-		a96t3x6_set_enable(data, 0, 1);
-		a96t3x6_sar_sensing(data, 0);
+	if (data->earjack_noise) {
+		if (earjack == 1) {
+			a96t3x6_set_enable(data, 0, 1);
+			a96t3x6_sar_sensing(data, 0);
+		} else {
+			a96t3x6_sar_sensing(data, 1);
+			a96t3x6_set_enable(data, 1, 1);
+		}
+		data->earjack = earjack;
 	} else {
-		a96t3x6_sar_sensing(data, 1);
-		a96t3x6_set_enable(data, 1, 1);
+		if (earjack == 1) /* earjack inserted */
+			a96t3x6_sar_only_mode(data, 1);
+		else
+			a96t3x6_sar_only_mode(data, 0);
 	}
 
 	SENSOR_INFO("earjack was %s\n", (earjack) ? "inserted" : "removed");
@@ -965,7 +979,7 @@ static ssize_t bin_fw_ver(struct device *dev,
 {
 	struct a96t3x6_data *data = dev_get_drvdata(dev);
 
-	return snprintf(buf, PAGE_SIZE, "0x%02x\n", data->fw_ver_bin);
+	return snprintf(buf, PAGE_SIZE, "0x%02x%02x\n", data->md_ver_bin, data->fw_ver_bin);
 }
 
 static int a96t3x6_get_fw_version(struct a96t3x6_data *data, bool bootmode)
@@ -1026,7 +1040,7 @@ static ssize_t read_fw_ver(struct device *dev,
 		data->fw_ver = 0;
 	}
 
-	return snprintf(buf, PAGE_SIZE, "0x%02x\n", data->fw_ver);
+	return snprintf(buf, PAGE_SIZE, "0x%02x%02x\n", data->md_ver, data->fw_ver);
 }
 
 static int a96t3x6_load_fw_kernel(struct a96t3x6_data *data)
@@ -1770,6 +1784,10 @@ static int a96t3x6_parse_dt(struct a96t3x6_data *data, struct device *dev)
 	if (ret < 0)
 		data->firmup_cmd = 0;
 
+	ret = of_property_read_u8(np, "a96t3x6,earjack_noise", &data->earjack_noise);
+	if (ret < 0)
+		data->earjack_noise = 0;
+	
 	p = pinctrl_get_select_default(dev);
 	if (IS_ERR(p)) {
 		SENSOR_INFO("failed pinctrl_get\n");
@@ -1942,6 +1960,7 @@ static int a96t3x6_probe(struct i2c_client *client,
 #endif
 	SENSOR_INFO("done\n");
 	data->probe_done = true;
+	data->resume_called = false;
 	return 0;
 
 err_req_irq:
@@ -1997,6 +2016,7 @@ static int a96t3x6_suspend(struct device *dev)
 {
 	struct a96t3x6_data *data = dev_get_drvdata(dev);
 
+	data->resume_called = false;
 	SENSOR_INFO("%s\n", __func__);
 	a96t3x6_sar_only_mode(data, 1);
 	a96t3x6_set_debug_work(data, 0, 1000);
@@ -2009,8 +2029,8 @@ static int a96t3x6_resume(struct device *dev)
 	struct a96t3x6_data *data = dev_get_drvdata(dev);
 
 	SENSOR_INFO("%s\n", __func__);
-	a96t3x6_sar_only_mode(data, 0);
-	a96t3x6_set_debug_work(data, 1, 1000);
+	data->resume_called = true;
+	a96t3x6_set_debug_work(data, 1, 0);
 
 	return 0;
 }
@@ -2018,7 +2038,7 @@ static int a96t3x6_resume(struct device *dev)
 static void a96t3x6_shutdown(struct i2c_client *client)
 {
 	struct a96t3x6_data *data = i2c_get_clientdata(client);
-
+	SENSOR_INFO("%s\n", __func__);
 	a96t3x6_set_debug_work(data, 0, 1000);
 
 	if (data->enabled) {

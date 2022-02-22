@@ -66,10 +66,12 @@ struct fimc_is_cis {
 	u32				max_fps;
 	struct mutex			control_lock;
 
+#ifdef USE_FACE_UNLOCK_AE_AWB_INIT
 	/* settings for initial AE */
 	bool				use_initial_ae;
 	ae_setting			init_ae_setting;
 	ae_setting			last_ae_setting;
+#endif
 };
 
 struct fimc_is_actuator_data {

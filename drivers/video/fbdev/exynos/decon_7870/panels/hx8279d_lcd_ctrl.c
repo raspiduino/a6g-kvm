@@ -1,14 +1,10 @@
 /*
- * drivers/video/decon_7870/panels/hx8279d_lcd_ctrl.c
- *
- * Samsung SoC MIPI LCD CONTROL functions
- *
- * Copyright (c) 2015 Samsung Electronics
+ * Copyright (c) Samsung Electronics Co., Ltd.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
-*/
+ */
 
 #include <linux/lcd.h>
 #include <linux/backlight.h>
@@ -47,7 +43,6 @@ struct lcd_info {
 		};
 		u32			value;
 	} id_info;
-	unsigned char			dump_info[3];
 
 	struct dsim_device		*dsim;
 
@@ -57,8 +52,6 @@ struct lcd_info {
 	unsigned int			pwm_max;
 	unsigned int			pwm_outdoor;
 
-	/* temporary sysfs to panel parameter tuning */
-	unsigned int			write_disable;
 	int			tp_mode;
 };
 
@@ -89,6 +82,7 @@ try_write:
 	return ret;
 }
 
+#if defined(CONFIG_SEC_FACTORY)
 static int dsim_read_hl_data(struct lcd_info *lcd, u8 addr, u32 size, u8 *buf)
 {
 	int ret = 0, rx_size = 0;
@@ -111,24 +105,7 @@ try_read:
 
 	return ret;
 }
-
-static int dsim_read_hl_data_offset(struct lcd_info *lcd, u8 addr, u32 size, u8 *buf, u32 offset)
-{
-	unsigned char wbuf[] = {0xB0, 0};
-	int ret = 0;
-
-	wbuf[1] = offset;
-
-	ret = dsim_write_hl_data(lcd, wbuf, ARRAY_SIZE(wbuf));
-	if (ret < 0)
-		dev_err(&lcd->ld->dev, "%s: failed to write CMD : wbuf\n", __func__);
-
-	ret = dsim_read_hl_data(lcd, addr, size, buf);
-	if (ret < 0)
-		dev_err(&lcd->ld->dev, "%s: fail\n", __func__);
-
-	return ret;
-}
+#endif
 
 static int dsim_panel_set_brightness(struct lcd_info *lcd, int force)
 {
@@ -284,7 +261,7 @@ static int hx8279d_read_id(struct lcd_info *lcd)
 	if (ret < 0)
 		goto stop;
 
-	lcd->id_info.id[2] = lcd->id_info.id[2] + buf;
+	lcd->id_info.id[2] = buf;
 
 stop:
 	if (ret < 0 || !lcd->id_info.value) {
@@ -391,23 +368,22 @@ static int hx8279d_init(struct lcd_info *lcd)
 	hx8279d_read_id(lcd);
 #endif
 
-	if (lcdtype == CRT_PANEL_ID) {
-				dev_info(&lcd->ld->dev, "%s: CPT PANEL. [0x%x]\n", __func__, lcdtype);
+	if (lcd->id_info.id[2] == CRT_PANEL_ID) {
+		dev_info(&lcd->ld->dev, "%s: CPT PANEL. [0x%x]\n", __func__, cpu_to_be32(lcd->id_info.value));
 		ret = dsi_write_table(lcd, SEQ_CMD_TABLE_CPT, ARRAY_SIZE(SEQ_CMD_TABLE_CPT));
 		if (ret < 0) {
 			dev_err(&lcd->ld->dev, "%s: failed to write CMD : SEQ_CMD_TABLE_CPT\n", __func__);
 			goto init_err;
 		}
-	} else if (lcdtype == BOE2_PANEL_ID) {
-		dev_info(&lcd->ld->dev, "%s: BOE2 PANEL. [0x%x]\n", __func__, lcdtype);
+	} else if (lcd->id_info.id[2] == BOE2_PANEL_ID) {
+		dev_info(&lcd->ld->dev, "%s: BOE2 PANEL. [0x%x]\n", __func__, cpu_to_be32(lcd->id_info.value));
 		ret = dsi_write_table(lcd, SEQ_CMD_TABLE_BOE2, ARRAY_SIZE(SEQ_CMD_TABLE_BOE2));
 		if (ret < 0) {
 			dev_err(&lcd->ld->dev, "%s: failed to write CMD : SEQ_CMD_TABLE_BOE2\n", __func__);
 			goto init_err;
 		}
 	} else {
-
-		dev_info(&lcd->ld->dev, "%s: BOE PANEL. [0x%x]\n", __func__, lcdtype);
+		dev_info(&lcd->ld->dev, "%s: BOE PANEL. [0x%x]\n", __func__, cpu_to_be32(lcd->id_info.value));
 		ret = dsi_write_table(lcd, SEQ_CMD_TABLE, ARRAY_SIZE(SEQ_CMD_TABLE));
 		if (ret < 0) {
 			dev_err(&lcd->ld->dev, "%s: failed to write CMD : SEQ_CMD_TABLE\n", __func__);
@@ -492,130 +468,9 @@ static ssize_t window_type_show(struct device *dev,
 {
 	struct lcd_info *lcd = dev_get_drvdata(dev);
 
-	sprintf(buf, "%x %x %x\n", lcd->id_info.id[0], lcd->id_info.id[1], lcd->id_info.id[2]);
+	sprintf(buf, "%02x %02x %02x\n", lcd->id_info.id[0], lcd->id_info.id[1], lcd->id_info.id[2]);
 
 	return strlen(buf);
-}
-
-static ssize_t dump_register_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	struct lcd_info *lcd = dev_get_drvdata(dev);
-	char *pos = buf;
-	u8 reg, len, table;
-	int i;
-	u8 *dump = NULL;
-
-	reg = lcd->dump_info[0];
-	len = lcd->dump_info[1];
-	table = lcd->dump_info[2];
-
-	if (!reg || !len || reg > 0xff || len > 255 || table > 255)
-		goto exit;
-
-	dump = kcalloc(len, sizeof(u8), GFP_KERNEL);
-
-	if (lcd->state == PANEL_STATE_RESUMED)
-		dsim_read_hl_data_offset(lcd, reg, len, dump, table);
-
-	pos += sprintf(pos, "+ [%02X]\n", reg);
-	for (i = 0; i < len; i++)
-		pos += sprintf(pos, "%2d: %02x\n", i + 1, dump[i]);
-	pos += sprintf(pos, "- [%02X]\n", reg);
-
-	dev_info(&lcd->ld->dev, "+ [%02X]\n", reg);
-	for (i = 0; i < len; i++)
-		dev_info(&lcd->ld->dev, "%2d: %02x\n", i + 1, dump[i]);
-	dev_info(&lcd->ld->dev, "- [%02X]\n", reg);
-
-	kfree(dump);
-exit:
-	return pos - buf;
-}
-
-static ssize_t dump_register_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t size)
-{
-	struct lcd_info *lcd = dev_get_drvdata(dev);
-	unsigned int reg, len, offset;
-	int ret;
-
-	ret = sscanf(buf, "%8x %8d %8d", &reg, &len, &offset);
-
-	if (ret == 2)
-		offset = 0;
-
-	dev_info(dev, "%s: %x %d %d\n", __func__, reg, len, offset);
-
-	if (ret < 0)
-		return ret;
-	else {
-		if (!reg || !len || reg > 0xff || len > 255 || offset > 255)
-			return -EINVAL;
-
-		lcd->dump_info[0] = reg;
-		lcd->dump_info[1] = len;
-		lcd->dump_info[2] = offset;
-	}
-
-	return size;
-}
-
-static ssize_t porch_change_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t size)
-{
-	struct lcd_info *lcd = dev_get_drvdata(dev);
-	struct dsim_device *dsim = lcd->dsim;
-	unsigned int hfp, hbp, hsa, vfp, vbp, vsa;
-	unsigned long vclk;
-	struct decon_device *decon = dsim->decon;
-	int ret;
-
-	ret = sscanf(buf, "%8lu %8d %8d %8d %8d %8d %8d", &vclk, &hbp, &hfp, &hsa, &vbp, &vfp, &vsa);
-
-	dev_info(dev, "%s: input: vclk:%lu hbp:%d hfp:%d hsa:%d vbp:%d vfp:%d vsa:%d\n",
-		__func__, vclk, hbp, hfp, hsa, vbp, vfp, vsa);
-
-	/* dsim */
-	dsim->lcd_info.hbp = hbp;
-	dsim->lcd_info.hfp = hfp;
-	dsim->lcd_info.hsa = hsa;
-
-	dsim->lcd_info.vbp = vbp;
-	dsim->lcd_info.vfp = vfp;
-	dsim->lcd_info.vsa = vsa;
-
-	/* decon */
-	decon->lcd_info->hbp = hbp;
-	decon->lcd_info->hfp = hfp;
-	decon->lcd_info->hsa = hsa;
-
-	decon->lcd_info->vbp = vbp;
-	decon->lcd_info->vfp = vfp;
-	decon->lcd_info->vsa = vsa;
-
-	decon->pdata->disp_pll_clk = vclk;
-	decon->pdata->disp_vclk = vclk;
-
-	return size;
-}
-
-static ssize_t clk_change_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t size)
-{
-	struct lcd_info *lcd = dev_get_drvdata(dev);
-	unsigned int p, m, s;
-	int ret;
-
-	ret = sscanf(buf, "%8d %8d %8d", &p, &m, &s);
-
-	dev_info(dev, "%s: p:%d m:%d s:%d\n", __func__, p, m, s);
-
-	lcd->dsim->lcd_info.dphy_pms.p = p;
-	lcd->dsim->lcd_info.dphy_pms.m = m;
-	lcd->dsim->lcd_info.dphy_pms.s = s;
-
-	return size;
 }
 
 static ssize_t tp_change_store(struct device *dev,
@@ -638,94 +493,13 @@ static ssize_t tp_change_store(struct device *dev,
 	return size;
 }
 
-static ssize_t write_register_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t size)
-{
-	struct lcd_info *lcd = dev_get_drvdata(dev);
-	int ret, i, data, count = 0;
-	unsigned char seqbuf[255] = {0, };
-	unsigned char *printbuf = NULL;
-	char *pos, *token;
-
-	pos = (char *)buf;
-	while ((token = strsep(&pos, " ")) != NULL) {
-		ret = kstrtouint(token, 16, &data);
-		if (!ret) {
-			seqbuf[count] = data;
-			count++;
-		}
-		if (count == ARRAY_SIZE(seqbuf))
-			break;
-	}
-
-	pos = printbuf = kcalloc(size, sizeof(u8), GFP_KERNEL);
-	for (i = 0; i < count; i++)
-		pos += sprintf(pos, "%02x ", seqbuf[i]);
-	pos += sprintf(pos, "\n");
-
-	if (count <= 1) {
-		dev_info(&lcd->ld->dev, "%s: invalid input, %s\n", __func__, printbuf);
-		goto exit;
-	} else
-		dev_info(&lcd->ld->dev, "%s: %s\n", __func__, printbuf);
-
-	if (lcd->state == PANEL_STATE_RESUMED)
-		ret = dsim_write_hl_data(lcd, seqbuf, count);
-
-exit:
-	kfree(printbuf);
-
-	return size;
-}
-
-static ssize_t write_disable_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	struct lcd_info *lcd = dev_get_drvdata(dev);
-
-	sprintf(buf, "%u\n", lcd->write_disable);
-
-	return strlen(buf);
-}
-
-static ssize_t write_disable_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t size)
-{
-	struct lcd_info *lcd = dev_get_drvdata(dev);
-	int value;
-	int rc;
-
-	rc = kstrtoul(buf, (unsigned int)0, (unsigned long *)&value);
-	if (rc < 0)
-		return rc;
-	else {
-		if (lcd->write_disable != value) {
-			dev_info(&lcd->ld->dev, "%s: %d, %d\n", __func__, lcd->write_disable, value);
-			mutex_lock(&lcd->lock);
-			lcd->write_disable = value;
-			mutex_unlock(&lcd->lock);
-		}
-	}
-	return size;
-}
-
 static DEVICE_ATTR(lcd_type, 0444, lcd_type_show, NULL);
 static DEVICE_ATTR(window_type, 0444, window_type_show, NULL);
-static DEVICE_ATTR(dump_register, 0644, dump_register_show, dump_register_store);
-static DEVICE_ATTR(write_register, 0220, NULL, write_register_store);
-static DEVICE_ATTR(write_disable, 0644, write_disable_show, write_disable_store);
-static DEVICE_ATTR(porch_change, 0220, NULL, porch_change_store);
-static DEVICE_ATTR(clk_change, 0220, NULL, clk_change_store);
 static DEVICE_ATTR(tp_change, 0220, NULL, tp_change_store);
 
 static struct attribute *lcd_sysfs_attributes[] = {
 	&dev_attr_lcd_type.attr,
 	&dev_attr_window_type.attr,
-	&dev_attr_dump_register.attr,
-	&dev_attr_write_register.attr,
-	&dev_attr_write_disable.attr,
-	&dev_attr_porch_change.attr,
-	&dev_attr_clk_change.attr,
 	&dev_attr_tp_change.attr,
 	NULL,
 };

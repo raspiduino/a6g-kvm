@@ -524,11 +524,11 @@ static ssize_t sockfs_listxattr(struct dentry *dentry, char *buffer,
 	return used;
 }
 
-int sockfs_setattr(struct dentry *dentry, struct iattr *iattr)
+static int sockfs_setattr(struct dentry *dentry, struct iattr *iattr)
 {
 	int err = simple_setattr(dentry, iattr);
 
-	if (!err) {
+	if (!err && (iattr->ia_valid & ATTR_UID)) {
 		struct socket *sock = SOCKET_I(dentry->d_inode);
 
 		sock->sk->sk_uid = iattr->ia_uid;
@@ -555,24 +555,12 @@ static struct socket *sock_alloc(void)
 {
 	struct inode *inode;
 	struct socket *sock;
-    /* START_OF_KNOX_VPN */
-    struct timespec open_timespec;
-    /* END_OF_KNOX_VPN */
 
 	inode = new_inode_pseudo(sock_mnt->mnt_sb);
 	if (!inode)
 		return NULL;
 
 	sock = SOCKET_I(inode);
-
-	/* START_OF_KNOX_VPN */
-    if(sock) {
-        sock->knox_sent = 0;
-        sock->knox_recv = 0;
-        open_timespec = current_kernel_time();
-        sock->open_time = open_timespec.tv_sec;
-    }
-    /* END_OF_KNOX_VPN */
 
 	kmemcheck_annotate_bitfield(sock, type);
 	inode->i_ino = get_next_ino();
@@ -632,12 +620,6 @@ void sock_release(struct socket *sock)
 		iput(SOCK_INODE(sock));
 		return;
 	}
-	/* START_OF_KNOX_VPN */
-    sock->knox_sent = 0;
-    sock->knox_recv = 0;
-    sock->open_time = 0;
-    /* END_OF_KNOX_VPN */
-
 	sock->file = NULL;
 }
 EXPORT_SYMBOL(sock_release);
@@ -2265,11 +2247,10 @@ static int ___sys_recvmsg(struct socket *sock, struct msghdr __user *msg,
 
 	if (MSG_CMSG_COMPAT & flags)
 		err = get_compat_msghdr(msg_sys, msg_compat);
-	else
+	else 
 		err = copy_msghdr_from_user(msg_sys, msg);
-	if (err)
-		return err;
-
+	if (err < 0)
+			return err;
 	if (msg_sys->msg_iovlen > UIO_FASTIOV) {
 		err = -EMSGSIZE;
 		if (msg_sys->msg_iovlen > UIO_MAXIOV)
@@ -2954,14 +2935,9 @@ static int ethtool_ioctl(struct net *net, struct compat_ifreq __user *ifr32)
 		    copy_in_user(&rxnfc->fs.ring_cookie,
 				 &compat_rxnfc->fs.ring_cookie,
 				 (void __user *)(&rxnfc->fs.location + 1) -
-				 (void __user *)&rxnfc->fs.ring_cookie))
-			return -EFAULT;
-		if (ethcmd == ETHTOOL_GRXCLSRLALL) {
-			if (put_user(rule_cnt, &rxnfc->rule_cnt))
-				return -EFAULT;
-		} else if (copy_in_user(&rxnfc->rule_cnt,
-					&compat_rxnfc->rule_cnt,
-					sizeof(rxnfc->rule_cnt)))
+				 (void __user *)&rxnfc->fs.ring_cookie) ||
+		    copy_in_user(&rxnfc->rule_cnt, &compat_rxnfc->rule_cnt,
+				 sizeof(rxnfc->rule_cnt)))
 			return -EFAULT;
 	}
 
@@ -3309,7 +3285,6 @@ static int compat_sock_ioctl_trans(struct file *file, struct socket *sock,
 	case SIOCSIFVLAN:
 	case SIOCADDDLCI:
 	case SIOCDELDLCI:
-	case SIOCKILLADDR:
 		return sock_ioctl(file, cmd, arg);
 
 	case SIOCGIFFLAGS:

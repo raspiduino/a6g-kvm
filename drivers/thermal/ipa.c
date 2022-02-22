@@ -1461,11 +1461,6 @@ int thermal_unregister_notifier(struct notifier_block *nb)
 extern bool exynos_cpufreq_init_done;
 static struct delayed_work init_work;
 
-void ipa_update(void)
-{
-	ipa_setup_power_tables();
-}
-
 static void arbiter_init(struct work_struct *work)
 {
 	int i;

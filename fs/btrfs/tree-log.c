@@ -1983,10 +1983,8 @@ again:
 			nritems = btrfs_header_nritems(path->nodes[0]);
 			if (path->slots[0] >= nritems) {
 				ret = btrfs_next_leaf(root, path);
-				if (ret == 1)
+				if (ret)
 					break;
-				else if (ret < 0)
-					goto out;
 			}
 			btrfs_item_key_to_cpu(path->nodes[0], &found_key,
 					      path->slots[0]);
@@ -2203,9 +2201,6 @@ static noinline int walk_down_log_tree(struct btrfs_trans_handle *trans,
 					clean_tree_block(trans, root, next);
 					btrfs_wait_tree_block_writeback(next);
 					btrfs_tree_unlock(next);
-				} else {
-					if (test_and_clear_bit(EXTENT_BUFFER_DIRTY, &next->bflags))
-						clear_extent_buffer_dirty(next);
 				}
 
 				WARN_ON(root_owner !=
@@ -2284,9 +2279,6 @@ static noinline int walk_up_log_tree(struct btrfs_trans_handle *trans,
 					clean_tree_block(trans, root, next);
 					btrfs_wait_tree_block_writeback(next);
 					btrfs_tree_unlock(next);
-				} else {
-					if (test_and_clear_bit(EXTENT_BUFFER_DIRTY, &next->bflags))
-						clear_extent_buffer_dirty(next);
 				}
 
 				WARN_ON(root_owner != BTRFS_TREE_LOG_OBJECTID);
@@ -2363,9 +2355,6 @@ static int walk_log_tree(struct btrfs_trans_handle *trans,
 				clean_tree_block(trans, log, next);
 				btrfs_wait_tree_block_writeback(next);
 				btrfs_tree_unlock(next);
-			} else {
-				if (test_and_clear_bit(EXTENT_BUFFER_DIRTY, &next->bflags))
-					clear_extent_buffer_dirty(next);
 			}
 
 			WARN_ON(log->root_key.objectid !=
@@ -3085,11 +3074,8 @@ static noinline int log_dir_items(struct btrfs_trans_handle *trans,
 		 * from this directory and from this transaction
 		 */
 		ret = btrfs_next_leaf(root, path);
-		if (ret) {
-			if (ret == 1)
-				last_offset = (u64)-1;
-			else
-				err = ret;
+		if (ret == 1) {
+			last_offset = (u64)-1;
 			goto done;
 		}
 		btrfs_item_key_to_cpu(path->nodes[0], &tmp, path->slots[0]);
@@ -3539,7 +3525,6 @@ fill_holes:
 			ASSERT(ret == 0);
 			src = src_path->nodes[0];
 			i = 0;
-			need_find_last_extent = true;
 		}
 
 		btrfs_item_key_to_cpu(src, &key, i);

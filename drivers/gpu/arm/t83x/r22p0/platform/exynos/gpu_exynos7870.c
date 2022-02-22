@@ -75,7 +75,7 @@ void __iomem *g3d1_outstanding_regs;
 static gpu_dvfs_info gpu_dvfs_table_default[] = {
 	{1300, 900000, 0, 98, 100, 1, 0, 902000, 400000, 1586000, CPU_MAX},
 	{1246, 900000, 0, 98, 100, 1, 0, 902000, 400000, 1586000, CPU_MAX},
-	{1146, 1200000, 0, 98, 100, 1, 0, 1144000, 400000, 1586000, CPU_MAX},
+	{1146, 900000, 0, 98, 100, 1, 0, 902000, 400000, 1586000, CPU_MAX},
 	{1001, 900000, 0, 98, 100, 1, 0, 902000, 400000, 1586000, CPU_MAX},
 	{845,  900000, 0, 78,  98, 1, 0, 836000, 400000, 1248000, CPU_MAX},
 	{728,  900000, 0, 78,  85, 1, 0, 728000, 400000, 1144000, CPU_MAX},
@@ -94,10 +94,9 @@ static int mif_min_table[] = {
 };
 
 static gpu_attribute gpu_config_attributes[] = {
-	{GPU_MAX_CLOCK, 1146},
-	{GPU_MAX_CLOCK_LIMIT, 1146},
+	{GPU_MAX_CLOCK, 1001},
+	{GPU_MAX_CLOCK_LIMIT, 1001},
 	{GPU_MIN_CLOCK, 343},
-	{GPU_MIN_CLOCK_LIMIT, 343},
 	{GPU_DVFS_START_CLOCK, 343},
 	{GPU_DVFS_BL_CONFIG_CLOCK, 343},
 	{GPU_GOVERNOR_TYPE, G3D_DVFS_GOVERNOR_INTERACTIVE},
@@ -335,9 +334,13 @@ static int gpu_get_clock(struct kbase_device *kbdev)
 
 static int gpu_enable_clock(struct exynos_context *platform)
 {
+	int err = 0;
 	GPU_LOG(DVFS_DEBUG, DUMMY, 0u, 0u, "%s: [vclk_g3d]\n", __func__);
-	clk_prepare_enable(vclk_g3d);
-	return 0;
+	err = clk_prepare_enable(vclk_g3d);
+	if (err) {
+		GPU_LOG(DVFS_ERROR, LSI_CLOCK_ON_ERR, 0u, 0u, "%s: failed to clk_enable [vclk_g3d]\n", __func__);
+	}
+	return err;
 }
 
 static int gpu_disable_clock(struct exynos_context *platform)

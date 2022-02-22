@@ -294,7 +294,7 @@ struct fimc_is_device_sensor {
 
 	struct exynos_platform_fimc_is_sensor		*pdata;
 	void						*private_data;
-	
+
 #ifdef ENABLE_INIT_AWB
 	/* backup AWB gains for use initial gain */
 	float					init_wb[WB_GAIN_COUNT];
@@ -362,6 +362,8 @@ int fimc_is_sensor_deinit_module(struct fimc_is_module_enum *module);
 int fimc_is_sensor_g_position(struct fimc_is_device_sensor *device);
 int fimc_is_search_sensor_module(struct fimc_is_device_sensor *device,
 	u32 sensor_id, struct fimc_is_module_enum **module);
+int fimc_is_search_sensor_module_with_position(struct fimc_is_device_sensor *device,
+	u32 sensor_id, u32 position, struct fimc_is_module_enum **module);
 int fimc_is_sensor_tag(struct fimc_is_device_sensor *device,
 	struct fimc_is_frame *frame);
 #ifdef CONFIG_OIS_USE

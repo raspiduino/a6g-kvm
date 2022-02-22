@@ -77,6 +77,8 @@
 #include <linux/workqueue.h>
 #include <linux/kcov.h>
 
+#include <linux/workqueue.h>
+
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
 #include <asm/uaccess.h>
@@ -89,6 +91,10 @@
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/task.h>
+
+#ifdef CONFIG_SECURITY_DEFEX
+#include <linux/defex.h>
+#endif
 
 /*
  * Protected counters by write_lock_irq(&tasklist_lock)
@@ -537,37 +543,8 @@ static inline void mm_free_pgd(struct mm_struct *mm)
 
 __cacheline_aligned_in_smp DEFINE_SPINLOCK(mmlist_lock);
 
-struct mm_work {
-	struct work_struct work;
-	struct mm_struct *mm;
-};
-
-static struct mm_struct *allocate_mm(void)
-{
-	struct mm_struct *mm;
-	struct mm_work *mmw;
-
-	mmw = kmalloc(sizeof(*mmw), GFP_KERNEL);
-	if (!mmw)
-		return NULL;
-
-	mm = kmem_cache_alloc(mm_cachep, GFP_KERNEL);
-	if (!mm) {
-		kfree(mmw);
-		return NULL;
-	}
-
-	mm->async_put_work = mmw;
-	mmw->mm = mm;
-
-	return mm;
-}
-
-static void free_mm(struct mm_struct *mm)
-{
-	kfree(mm->async_put_work);
-	kmem_cache_free(mm_cachep, mm);
-}
+#define allocate_mm()	(kmem_cache_alloc(mm_cachep, GFP_KERNEL))
+#define free_mm(mm)	(kmem_cache_free(mm_cachep, (mm)))
 
 static unsigned long default_dump_filter = MMF_DUMP_FILTER_DEFAULT;
 
@@ -668,12 +645,15 @@ static void check_mm(struct mm_struct *mm)
 struct mm_struct *mm_alloc(void)
 {
 	struct mm_struct *mm;
+	struct work_struct putwork;
 
 	mm = allocate_mm();
 	if (!mm)
 		return NULL;
 
+	putwork = mm->async_put_work;
 	memset(mm, 0, sizeof(*mm));
+	mm->async_put_work = putwork;
 	return mm_init(mm, current);
 }
 
@@ -727,17 +707,15 @@ EXPORT_SYMBOL_GPL(mmput);
 
 static void mmput_async_fn(struct work_struct *work)
 {
-	struct mm_work *mmw = container_of(work, struct mm_work, work);
-	__mmput(mmw->mm);
+	struct mm_struct *mm = container_of(work, struct mm_struct, async_put_work);
+	__mmput(mm);
 }
 
 void mmput_async(struct mm_struct *mm)
 {
 	if (atomic_dec_and_test(&mm->mm_users)) {
-		struct mm_work *mmw = mm->async_put_work;
-
-		INIT_WORK(&mmw->work, mmput_async_fn);
-		schedule_work(&mmw->work);
+		INIT_WORK(&mm->async_put_work, mmput_async_fn);
+		schedule_work(&mm->async_put_work);
 	}
 }
 
@@ -920,13 +898,16 @@ void mm_release(struct task_struct *tsk, struct mm_struct *mm)
 static struct mm_struct *dup_mm(struct task_struct *tsk)
 {
 	struct mm_struct *mm, *oldmm = current->mm;
+	struct work_struct putwork;
 	int err;
 
 	mm = allocate_mm();
 	if (!mm)
 		goto fail_nomem;
 
+	putwork = mm->async_put_work;
 	memcpy(mm, oldmm, sizeof(*mm));
+	mm->async_put_work = putwork;
 
 	if (!mm_init(mm, tsk))
 		goto fail_nomem;
@@ -1086,9 +1067,7 @@ static int copy_sighand(unsigned long clone_flags, struct task_struct *tsk)
 	if (!sig)
 		return -ENOMEM;
 	atomic_set(&sig->count, 1);
-	spin_lock_irq(&current->sighand->siglock);
 	memcpy(sig->action, current->sighand->action, sizeof(sig->action));
-	spin_unlock_irq(&current->sighand->siglock);
 	return 0;
 }
 
@@ -1111,7 +1090,7 @@ static void posix_cpu_timers_init_group(struct signal_struct *sig)
 	/* Thread group counters. */
 	thread_group_cputime_init(sig);
 
-	cpu_limit = ACCESS_ONCE(sig->rlim[RLIMIT_CPU].rlim_cur);
+	cpu_limit = READ_ONCE(sig->rlim[RLIMIT_CPU].rlim_cur);
 	if (cpu_limit != RLIM_INFINITY) {
 		sig->cputime_expires.prof_exp = secs_to_cputime(cpu_limit);
 		sig->cputimer.running = 1;
@@ -1368,18 +1347,6 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	if (!p)
 		goto fork_out;
 
-	/*
-	 * This _must_ happen before we call free_task(), i.e. before we jump
-	 * to any of the bad_fork_* labels. This is to avoid freeing
-	 * p->set_child_tid which is (ab)used as a kthread's data pointer for
-	 * kernel threads (PF_KTHREAD).
-	 */
-	p->set_child_tid = (clone_flags & CLONE_CHILD_SETTID) ? child_tidptr : NULL;
-	/*
-	 * Clear TID on mm_release()?
-	 */
-	p->clear_child_tid = (clone_flags & CLONE_CHILD_CLEARTID) ? child_tidptr : NULL;
-
 	ftrace_graph_init_task(p);
 
 	rt_mutex_init_task(p);
@@ -1548,6 +1515,11 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	if (retval)
 		goto bad_fork_cleanup_io;
 
+	p->set_child_tid = (clone_flags & CLONE_CHILD_SETTID) ? child_tidptr : NULL;
+	/*
+	 * Clear TID on mm_release()?
+	 */
+	p->clear_child_tid = (clone_flags & CLONE_CHILD_CLEARTID) ? child_tidptr : NULL;
 #ifdef CONFIG_BLOCK
 	p->plug = NULL;
 #endif
@@ -1806,6 +1778,10 @@ long do_fork(unsigned long clone_flags,
 
 		pid = get_task_pid(p, PIDTYPE_PID);
 		nr = pid_vnr(pid);
+
+#ifdef CONFIG_SECURITY_DEFEX
+		task_defex_zero_creds(p);
+#endif
 
 		if (clone_flags & CLONE_PARENT_SETTID)
 			put_user(nr, parent_tidptr);
